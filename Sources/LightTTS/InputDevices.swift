@@ -8,8 +8,8 @@ struct InputDevice: Identifiable {
     static var available: [InputDevice] {
         AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified).devices.map { InputDevice(id: $0.uniqueID, name: $0.localizedName) }
     }
-    static func applySelection(to engine: AVAudioEngine) throws {
-        guard let uid = UserDefaults.standard.string(forKey: "inputDeviceUID"), !uid.isEmpty else { return }
+    static func applySelection(to engine: AVAudioEngine, deviceUID: String? = nil) throws {
+        guard let uid = deviceUID ?? UserDefaults.standard.string(forKey: "inputDeviceUID"), !uid.isEmpty else { return }
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslateUIDToDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var value = uid as CFString
         var device = AudioDeviceID(0)
