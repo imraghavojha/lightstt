@@ -3,6 +3,9 @@ import AppKit
 import AVFoundation
 import ApplicationServices
 import ServiceManagement
+import LightTTSCore
+
+private final class SettingsDialogState: ObservableObject { @Published var deleting: Model? }
 
 private enum SettingsTab: String, CaseIterable {
     case sound = "Sound", models = "Models", library = "Library", configuration = "Configuration"
@@ -13,6 +16,8 @@ struct SettingsView: View {
     @ObservedObject var controller: AppController
     var detach: () -> Void
     var attached: Bool
+    @StateObject private var dialog = SettingsDialogState()
+    @AppStorage("selectedModel") private var selectedModel = "whisper-tiny.en"
     @AppStorage("theme") private var theme = "Auto"
     @Environment(\.colorScheme) private var scheme
     private var effectiveTheme: String { ProcessInfo.processInfo.environment["LIGHTTTS_SCREENSHOT_APPEARANCE"] ?? theme }
@@ -34,7 +39,7 @@ struct SettingsView: View {
             }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 58/255, green: 62/255, blue: 69/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
             VStack(spacing: 0) {
-                if controller.settingsSelection != "Library" && !(controller.settingsSelection == "Configuration" && controller.showAdvanced) {
+                if controller.settingsSelection != "Models" && controller.settingsSelection != "Library" && !(controller.settingsSelection == "Configuration" && controller.showAdvanced) {
                     HStack {
                         Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer()
                         Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)).foregroundStyle(.secondary) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(LinearGradient(colors: dark ? [Color(white: 0.29), Color(white: 0.22)] : [Color(white: 0.99), Color(white: 0.92)], startPoint: .top, endPoint: .bottom), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.16), lineWidth: 0.5)).offset(x: 6).help("Select microphone")
@@ -42,12 +47,16 @@ struct SettingsView: View {
                 }
                 switch controller.settingsSelection {
                 case "Sound": SoundPageView(controller: controller)
-                case "Models": ModelsPageView()
+                case "Models": ModelsPageView(controller: controller, deleting: $dialog.deleting)
                 case "Library": LibraryPageView(controller: controller)
                 default: ConfigurationPageView(controller: controller)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 43/255, green: 48/255, blue: 53/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
         }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(white: 0.30)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
+        .background(ConfirmationFrameOverlay(model: dialog.deleting, name: dialog.deleting?.name ?? "", cancel: { dialog.deleting = nil }, delete: { model in
+            do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }; dialog.deleting = nil
+        }))
+        .onChange(of: selectedModel) { _ in controller.reloadSelectedModel() }
     }
 }
 
@@ -68,7 +77,7 @@ private struct ConfigurationGlyph: View {
     }
 }
 
-struct ModelsPageView: View { var body: some View { Spacer() } }
+
 
 private struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
@@ -376,5 +385,93 @@ private struct SettingsPopup: NSViewRepresentable {
             parent.selection = parent.options[sender.indexOfSelectedItem].0
             if let index = parent.options.firstIndex(where: { $0.0 == parent.selection }) { sender.selectItem(at: index) }
         }
+    }
+}
+
+// A child panel covers the entire parent frame, including the title bar.
+private struct ConfirmationFrameOverlay: NSViewRepresentable {
+    let model: Model?
+    let name: String
+    let cancel: () -> Void
+    let delete: (Model) -> Void
+
+    func makeNSView(context: Context) -> Anchor { Anchor() }
+    func updateNSView(_ view: Anchor, context: Context) {
+        view.update(model: model, name: name, cancel: cancel, delete: delete)
+    }
+    static func dismantleNSView(_ view: Anchor, coordinator: ()) { view.removeOverlay() }
+
+    final class Anchor: NSView {
+        private var panel: ScrimPanel?
+        private var card: ConfirmationCard?
+        private var observers: [NSObjectProtocol] = []
+        private var keyMonitor: Any?
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); install() }
+        func update(model: Model?, name: String, cancel: @escaping () -> Void, delete: @escaping (Model) -> Void) {
+            guard let model else { card = nil; removeOverlay(); return }
+            card = ConfirmationCard(model: model, name: name, cancel: cancel, delete: { delete(model) })
+            install()
+        }
+        private func install() {
+            guard let card, let window else { return }
+            if let panel { (panel.contentView as? NSHostingView<ConfirmationCard>)?.rootView = card; return }
+            let panel = ScrimPanel(contentRect: window.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = false
+            panel.contentView = NSHostingView(rootView: card)
+            panel.setFrame(window.frame, display: true)
+            window.addChildWindow(panel, ordered: .above)
+            self.panel = panel
+            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak panel, weak window] _ in
+                    if let window { panel?.setFrame(window.frame, display: true) }
+                })
+            }
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak window] event in
+                if event.keyCode == 53, event.window === window { self?.card?.cancel(); return nil }
+                return event
+            }
+        }
+        func removeOverlay() {
+            for observer in observers { NotificationCenter.default.removeObserver(observer) }
+            observers.removeAll()
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
+            if let panel { panel.parent?.removeChildWindow(panel); panel.orderOut(nil); self.panel = nil }
+        }
+        deinit { removeOverlay() }
+    }
+    final class ScrimPanel: NSPanel {
+        override var canBecomeKey: Bool { false }
+        override var canBecomeMain: Bool { false }
+    }
+}
+
+private struct ConfirmationCard: View {
+    let model: Model
+    let name: String
+    let cancel: () -> Void
+    let delete: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.50)
+            VStack(alignment: .leading, spacing: 11) {
+                Text("Delete \(name)").font(.system(size: 13, weight: .bold))
+                Text(model.engine == "apple" ? "LightTTS will forget this selection; macOS manages the speech assets." : model.engine == "cloud" ? "The model and its API key will be removed." : "Are you sure you want to delete this model?").font(.system(size: 13)).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Button("Cancel", action: cancel).keyboardShortcut(.cancelAction).buttonStyle(AlertButton(destructive: false))
+                    Button("Delete", role: .destructive, action: delete).buttonStyle(AlertButton(destructive: true))
+                }
+            }.padding(20).frame(width: 260).background(colorScheme == .dark ? Color(red: 18/255, green: 19/255, blue: 23/255) : Color(red: 179/255, green: 180/255, blue: 184/255), in: RoundedRectangle(cornerRadius: 34)).shadow(radius: 18).offset(y: -14)
+        }.ignoresSafeArea()
+    }
+}
+
+private struct AlertButton: ButtonStyle {
+    let destructive: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 13, weight: .semibold)).foregroundStyle(destructive ? Color.red : Color.primary).frame(maxWidth: .infinity).frame(height: 28).background(destructive ? (colorScheme == .dark ? Color(red: 37/255, green: 21/255, blue: 22/255) : Color.red.opacity(configuration.isPressed ? 0.3 : 0.14)) : Color.primary.opacity(configuration.isPressed ? 0.2 : 0.12), in: Capsule())
     }
 }

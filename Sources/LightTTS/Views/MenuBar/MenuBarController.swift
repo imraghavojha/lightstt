@@ -25,7 +25,6 @@ import LightTTSCore
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
             popover.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
         }
-        updateContent(attached: true)
         if CommandLine.arguments.contains("--settings-window") { showDetachedSettings() }
         else if CommandLine.arguments.contains("--settings-popover") {
             expanded = true; updateContent(attached: true)
@@ -74,6 +73,7 @@ import LightTTSCore
     }
     private func showCompact() {
         guard let button = status.button else { return }
+        updateContent(attached: true)
         if let appearance = NSApp.appearance { button.appearance = appearance }
         let frontmost = NSWorkspace.shared.frontmostApplication
         previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
@@ -107,6 +107,7 @@ import LightTTSCore
         NSApp.activate(ignoringOtherApps: true)
     }
     func popoverDidClose(_ notification: Notification) {
+        popover.contentViewController = nil
         defer { previousApp = nil }
         guard !openingSettings, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
         previousApp?.activate()
@@ -128,6 +129,7 @@ import LightTTSCore
             host.sizingOptions = []; window?.contentView = host
         }
     }
+    func openSettingsWindow() { showDetachedSettings() }
     private func switchPresentation() {
         window?.orderOut(nil); window = nil
         expanded = true; updateContent(attached: true); showCompact()

@@ -1,10 +1,10 @@
-# Performance
+On 2026-10-30, on an Apple M1 Max (64 GB), macOS 27.0.1, with other builds running, we built and installed revision `06e9474` as a signed release with the existing identity. Each app was freshly launched and allowed two minutes to settle; `footprint` measured physical footprint and 30 two-second `top` intervals after the initial sample were averaged. LightTTS launch was timed from process spawn to its status-item trace. For transcription, a `say`-generated 16 kHz mono WAV was fed through `LIGHTTTS_TEST_AUDIO` using Whisper tiny.en; a separate run pasted into a local test text field. Footprint sampling included the app and helper approximately every two seconds. SuperWhisper exited or relaunched during all three settling attempts, so no comparable idle sample or unattended transcription was established. Values are single-run observations under load.
 
-Measured on an Apple M1 Max (64 GB), macOS 27.0.1, with the locally signed release app installed at `~/Applications/LightTTS.app`. A process-launch harness measured from spawning the executable until a marker written immediately after status-item construction. The first launch after rebuilding/reinstalling took **392.5 ms**. A later four-run sequence measured **368.6, 133.5, 123.4, and 114.0 ms**. These are single-machine observations with other applications running, not controlled cold-cache measurements. The first samples exceed the requested 200 ms target; the later warm samples meet it. Inference frameworks remain linked into the app process, and moving them to an on-demand helper is still a candidate for reducing cold launch.
-
-Five seconds after the last launch, `ps` reported **0.0% CPU and 54,016 KiB RSS**. The selected model had not been loaded. The app reported Accessibility and Input Monitoring granted, microphone authorization `authorized`, and an active event tap after both release and debug rebuilds. The installed app's designated requirement remained the same certificate and bundle identifier across those builds. No renewed permission prompt was observed during the checks.
-
-For end-to-end verification, a debug app used `LIGHTTTS_TEST_AUDIO` to feed a `say`-generated WAV without starting the microphone. A test-only HID event triggered the normal Option-Space shortcut, the recording popup was observed, and a second event stopped recording. Both Whisper tiny.en and Parakeet v3 inserted “This is a local speech recognition test.” into TextEdit; AppleScript read the text back. Earlier live speaker-to-microphone tests produced text with both engines but misrecognized the final word. Actual capture latency, largest-model memory, a controlled cold-launch distribution, and quit-during-download resume after process termination remain unmeasured.
-
-
-On a later release build, readiness was redefined to require both catalog availability and a successfully installed hotkey. Five sequential launches, with tracing enabled and other apps running, reached that marker in **481.8, 235.5, 235.3, 696.5, and 523.5 ms**. These are not controlled cold-cache samples; none met 200 ms. Trace points cover entry to `main`, AppKit initialization, status-item creation, catalog availability and hotkey installation. Heavy inference dependencies remain directly linked, so the requested on-demand helper and cold-launch target remain outstanding.
+| Metric | LightTTS | SuperWhisper |
+| --- | --- | --- |
+| Physical footprint after 2 min idle | 13 MB | N/A: three interrupted attempts |
+| Idle CPU, energy impact, wakeups/s (60 s mean) | 0.0%, 0.0, 0.0 | N/A: three interrupted attempts |
+| Launch to menu-bar item | 199 ms | N/A: item timing not observed |
+| Stop to paste | 140 ms; expected text observed | N/A: transcription not established unattended |
+| Peak footprint during transcription | N/A: sampling did not isolate processing; 156 MB app + helper observed around completion | N/A |
+| Footprint 2.5 min after transcription | 18 MB; helper exited | N/A |
