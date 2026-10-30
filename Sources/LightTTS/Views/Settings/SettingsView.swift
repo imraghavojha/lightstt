@@ -154,6 +154,8 @@ private struct ConfigurationPageView: View {
     @Environment(\.colorScheme) private var scheme
     @ObservedObject var controller: AppController
     @AppStorage("theme") private var theme = "Auto"
+    @AppStorage("modelIdleTimeoutSeconds") private var modelIdleTimeout = 120
+    @AppStorage("historyFolder") private var historyFolder = ""
     @AppStorage("recordingWindow") private var recordingWindow = "Classic"
     @AppStorage("alwaysShowRecordingWindow") private var alwaysShow = false
     @AppStorage("hotkeyCode") private var hotkeyCode = 49
@@ -219,14 +221,21 @@ private struct ConfigurationPageView: View {
                     unavailableRow("Close after transcription")
                 }
                 advancedHeading("Voice model")
-                SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Voice model lifetime is managed automatically") { Text("Automatic").foregroundStyle(.secondary) } }
+                SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Unload the voice model after this period of inactivity") { SettingsPopup(selection: $modelIdleTimeout, options: [(60, "1 minute"), (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"), (1800, "30 minutes")], width: 125).frame(width: 125, height: 28).onChange(of: modelIdleTimeout) { _ in controller.refreshModelIdleTimeout() } } }
                 advancedHeading("Audio processing")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Silence removal", help: "Remove silence from recordings") { Toggle("", isOn: $removeSilence).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Silence removal")) }; PageRule()
                     ConfigurationApplicationRow(title: "Dynamic normalization", help: "Normalize recording volume") { Toggle("", isOn: $normalizeAudio).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Dynamic normalization")) }
                 }
                 advancedHeading("App folder location")
-                SettingsCard { ConfigurationApplicationRow(title: "App folder location") { Text("Managed by LightTTS").foregroundStyle(.secondary) } }
+                SettingsCard { HStack(spacing: 10) {
+                    Text(controller.historyURL.deletingLastPathComponent().path).lineLimit(1).truncationMode(.middle).help(controller.historyURL.deletingLastPathComponent().path)
+                    Spacer(minLength: 8)
+                    Button("Change folder") {
+                        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+                        if panel.runModal() == .OK, let url = panel.url { do { try controller.changeHistoryFolder(url) } catch { controller.message = error.localizedDescription; let alert = NSAlert(error: error); alert.runModal() } }
+                    }
+                }.frame(minHeight: 46) }
                 advancedHeading("Text input")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Clipboard content", help: "Choose whether to restore the previous clipboard contents") {
