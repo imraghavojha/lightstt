@@ -67,8 +67,8 @@ import Darwin
         return folder.appendingPathComponent("history.json")
     }
     func changeHistoryFolder(_ destination: URL) throws {
-        let source = historyURL.deletingLastPathComponent().standardizedFileURL
-        let destination = destination.standardizedFileURL
+        let source = historyURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+        let destination = destination.standardizedFileURL.resolvingSymlinksInPath()
         guard source != destination else { return }
         guard historyMigration == nil, state == "idle" || state == "error" else { throw NSError(domain: "LightTTS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Wait for the current recording or folder change to finish."]) }
         guard !destination.path.hasPrefix(source.appendingPathComponent("Recordings", isDirectory: true).path + "/") else { throw NSError(domain: "LightTTS", code: 3, userInfo: [NSLocalizedDescriptionKey: "Choose a folder outside the current Recordings folder."]) }
@@ -93,8 +93,11 @@ import Darwin
                         items.append((from, to, directory.boolValue))
                         var enumerationError: Error?
                         if directory.boolValue, let enumerator = fm.enumerator(at: from, includingPropertiesForKeys: [.isDirectoryKey], options: [], errorHandler: { _, error in enumerationError = error; return false }) {
+                            var pathComponents: [String] = []
                             for case let url as URL in enumerator {
-                                let relative = String(url.path.dropFirst(from.path.count + 1))
+                                pathComponents = Array(pathComponents.prefix(max(0, enumerator.level - 1)))
+                                pathComponents.append(url.lastPathComponent)
+                                let relative = pathComponents.joined(separator: "/")
                                 let isDirectory = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
                                 items.append((url, to.appendingPathComponent(relative), isDirectory))
                             }
