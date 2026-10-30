@@ -10,14 +10,17 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         return url
     }
     @MainActor static func main() async throws {
-        precondition(focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: true, sameWindow: true, originalRole: nil, currentRole: nil))
-        precondition(focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: true, originalRole: "AXTextArea", currentRole: "AXTextArea"))
-        precondition(!focusTargetMatches(originalPID: 1, currentPID: 2, sameElement: true, sameWindow: true, originalRole: "AXTextArea", currentRole: "AXTextArea"))
-        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: true, sameWindow: false, originalRole: "AXTextArea", currentRole: "AXTextArea"))
-        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: true, originalRole: "AXTextArea", currentRole: "AXTextField"))
-        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: true, originalRole: nil, currentRole: nil))
-        precondition(focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: true, sameWindow: nil, originalRole: nil, currentRole: nil))
-        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: nil, originalRole: "AXTextArea", currentRole: "AXTextArea"))
+        precondition(focusDisposition(role: "AXTextField", subrole: "AXSecureTextField", secureInput: false) == .secure)
+        precondition(focusDisposition(role: "AXSecureTextField", subrole: nil, secureInput: false) == .secure)
+        precondition(focusDisposition(role: "AXTextArea", subrole: nil, secureInput: true) == .secure)
+        precondition(focusDisposition(role: "AXButton", subrole: nil, secureInput: false) == .unavailable)
+        precondition(focusDisposition(role: nil, subrole: nil, secureInput: false) == .unavailable)
+        precondition(focusDisposition(role: "AXTextArea", subrole: nil, secureInput: false) == .editable)
+        var chunks: [String] = []
+        do {
+            try typeInChunks(String(repeating: "a", count: 70), expectedPID: 1, currentPID: { chunks.isEmpty ? 1 : 2 }) { chunks.append($0) }
+            fatalError("expected app switch to abort typing")
+        } catch FocusError.changed { precondition(chunks.count == 1 && chunks[0].count == 32) }
         let defaults = SettingsDefaults.store
         let keys = ["hotkeyCode", "hotkeyModifiers", "rightOption", "pushShortcutEnabled", "mouseShortcut"]
         let saved = keys.map { defaults.object(forKey: $0) }

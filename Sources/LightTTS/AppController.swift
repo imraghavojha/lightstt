@@ -53,7 +53,6 @@ import IOKit.ps
     private var panel: NSPanel?
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
-    private var focusTask: Task<FocusTarget?, Never>?
     private var sessionAutoPaste = true
     private var testAudio: [Float]?
     private var defaultsObserver: NSObjectProtocol?
@@ -295,7 +294,6 @@ import IOKit.ps
         showPanel()
         warmSelected()
         sessionAutoPaste = UserDefaults.standard.object(forKey: "autoPaste") as? Bool ?? true
-        focusTask?.cancel(); focusTask = nil
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
             do {
                 let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.recordingLevel.value = value } }
@@ -303,8 +301,6 @@ import IOKit.ps
             } catch { fail(error.localizedDescription) }
             return
         }
-        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        focusTask = sessionAutoPaste && AXIsProcessTrusted() ? Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) } : nil
         Task {
             if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
                 do {
@@ -343,6 +339,8 @@ import IOKit.ps
     func stop() {
         guard state == "recording" else { return }
 
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let stopFocusTask = Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }
         LaunchTrace.mark("recording-stopped")
         let rawSamples = testAudio ?? audio?.stop() ?? []
         let elapsed = Date().timeIntervalSince(started)
@@ -394,11 +392,13 @@ import IOKit.ps
                 }
                 var pasteWarning: String?
                 if sessionAutoPaste {
-                    let target = await focusTask?.value
+                    let capture = await stopFocusTask.value
                     try Task.checkCancellation(); guard current == generation else { return }
                     if !AXIsProcessTrusted() {
                         pasteWarning = "Grant Accessibility to auto-paste. The transcription was copied to the clipboard."
-                    } else if let target {
+                    } else if capture.secure {
+                        pasteWarning = "Copied: secure field"
+                    } else if let target = capture.target {
                         let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
                         let send = UserDefaults.standard.bool(forKey: "sendOnShift")
                         let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
@@ -407,8 +407,9 @@ import IOKit.ps
                             try await Task.detached(priority: .userInitiated) {
                                 try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
                             }.value
-                        } catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
-                    } else { pasteWarning = "The focused field is unavailable. The transcription was copied to the clipboard." }
+                        } catch FocusError.secure { pasteWarning = "Copied: secure field" }
+                        catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
+                    } else { pasteWarning = "No focused editable field. The transcription was copied to the clipboard." }
                 }
                 if pasteWarning != nil || shouldCopyTranscript(autoPaste: sessionAutoPaste, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) {
                     writeTranscriptToClipboard(text)
@@ -484,7 +485,7 @@ import IOKit.ps
     func fail(_ text: String) {
         audioSettings.end()
         generation += 1; processing?.cancel(); processing = nil
-        _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; focusTask?.cancel(); focusTask = nil; recordingLevel.value = 0
+        _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; recordingLevel.value = 0
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
         unloadEngine(); message = text; state = "error"; showPanel(); runPendingHistoryReprocess()
     }
