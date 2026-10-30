@@ -26,7 +26,7 @@ struct CompactMenuView: View {
     @AppStorage("selectedModel") private var selectedModel = "whisper-tiny.en"
     @AppStorage("inputDeviceUID") private var selectedInput = ""
     @AppStorage("autoPaste") private var autoPaste = true
-    @AppStorage("pushToTalk") private var pushToTalk = false
+    @AppStorage("pushShortcutEnabled") private var pushShortcutEnabled = false
     @StateObject private var data = CompactMenuData()
     private var modelName: String { data.installedModels.first { $0.id == selectedModel }?.name ?? "Choose a model…" }
     private var inputName: String { data.devices.first { $0.id == selectedInput }?.name ?? "\(data.defaultName) (Default)" }
@@ -75,7 +75,7 @@ struct CompactMenuView: View {
 
             Divider().padding(.horizontal, 14).padding(.vertical, 4)
             HStack { Text("Auto-paste"); Spacer(); Toggle("Auto-paste", isOn: $autoPaste).labelsHidden().toggleStyle(.switch).controlSize(.mini) }.padding(.horizontal, 14).frame(height: 34)
-            HStack { Text("Push to talk"); Spacer(); Toggle("Push to talk", isOn: $pushToTalk).labelsHidden().toggleStyle(.switch).controlSize(.mini) }.padding(.horizontal, 14).frame(height: 34)
+            HStack { Text("Push to talk"); Spacer(); Toggle("Push to talk", isOn: $pushShortcutEnabled).labelsHidden().toggleStyle(.switch).controlSize(.mini).onChange(of: pushShortcutEnabled) { _ in NotificationCenter.default.post(name: .shortcutsChanged, object: nil) } }.padding(.horizontal, 14).frame(height: 34)
             Divider().padding(.horizontal, 14).padding(.vertical, 4)
             Button(action: openSettings) {
                 HStack { Text("Settings…"); Spacer(); Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary) }
