@@ -59,7 +59,18 @@ struct SettingsView: View {
                 default: ConfigurationPageView(controller: controller)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 43/255, green: 48/255, blue: 53/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
-        }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(white: 0.30)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
+        }.frame(width: 750, height: 508)
+        .overlay(alignment: .topLeading) {
+            Button(action: detach) {
+                Image(systemName: attached ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help(attached ? "Open settings in a window" : "Return settings to menu bar")
+            .accessibilityLabel(attached ? "Open settings in a window" : "Return settings to menu bar")
+            .padding(.leading, attached ? 16 : 75).padding(.top, 12)
+        }
+        .foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(white: 0.30)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
         .background(ConfirmationFrameOverlay(model: dialog.deleting, name: dialog.deleting?.name ?? "", cancel: { dialog.deleting = nil }, delete: { model in
             do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }; dialog.deleting = nil
         }))

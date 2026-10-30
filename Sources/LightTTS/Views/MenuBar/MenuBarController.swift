@@ -81,8 +81,18 @@ import LightTTSCore
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
     private func showSettings() {
+        // Re-anchor after changing size: resizing a shown popover can grow it
+        // above the menu bar and leave the settings outside the visible screen.
+        let previous = previousApp
+        openingSettings = true
+        popover.performClose(nil)
+        previousApp = previous
         expanded = true
         updateContent(attached: true)
+        if let button = status.button {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+        openingSettings = false
     }
     private func showDetachedSettings() {
         openingSettings = true
