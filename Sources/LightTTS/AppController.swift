@@ -261,7 +261,7 @@ import IOKit.ps
         installHotkey()
     }
     func handleShortcut(_ down: Bool) {
-        if down { toggleRecording() }
+        if down { if state == "recording" { LaunchTrace.mark("hotkey-stop") }; toggleRecording() }
     }
     func toggleRecording() {
         if state == "error" { cancel() }
@@ -272,7 +272,7 @@ import IOKit.ps
     private func handlePush(_ down: Bool) {
         pushHeld = down
         if down { if state == "error" { cancel() }; if state == "idle" { pushOwnsRecording = true; start(pushToTalk: true) } }
-        else if pushOwnsRecording { pushOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
+        else if pushOwnsRecording { if state == "recording" { LaunchTrace.mark("hotkey-stop") }; pushOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
     }
     private func handleMouse(_ down: Bool) {
         if down {
@@ -338,25 +338,37 @@ import IOKit.ps
     }
     func stop() {
         guard state == "recording" else { return }
+        LaunchTrace.mark("stop-enter")
 
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let stopFocusTask = Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }
         LaunchTrace.mark("recording-stopped")
         let rawSamples = testAudio ?? audio?.stop() ?? []
+        LaunchTrace.mark("capture-stopped")
         let elapsed = Date().timeIntervalSince(started)
         let recordingDate = started, recordDuration = Double(rawSamples.count) / 16000
         let inputID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
         let inputName = inputID.isEmpty ? "System default" : (AVCaptureDevice.devices(for: .audio).first { $0.uniqueID == inputID }?.localizedName ?? "Microphone")
         let processingStart = Date()
+        // AVAudioEngine teardown can block the main thread; retain the stopped capture
+        // until after text insertion instead of releasing it on the stop path.
+        let finishedCapture = audio
+        LaunchTrace.mark("stop-setup-start")
         testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; runPendingHistoryReprocess(); if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
+        LaunchTrace.mark("stop-setup-end")
         let usedPushToTalk = recordingUsesPushToTalk
         recordingUsesPushToTalk = false
         if let error = AudioProcessing.recordingError(samples: rawSamples, duration: elapsed, pushToTalk: usedPushToTalk) { fail(error); return }
 
-        processing = Task {
+        LaunchTrace.mark("processing-task-enqueued")
+        processing = Task { [finishedCapture] in
+            defer { withExtendedLifetime(finishedCapture) {} }
+            LaunchTrace.mark("processing-task-start")
             do {
                 let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+                LaunchTrace.mark("model-check-start")
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
+                LaunchTrace.mark("model-check-end")
                 if loadedID != selected || engine == nil {
                     state = "loading"
                     warmSelected()
@@ -375,7 +387,9 @@ import IOKit.ps
                 try Task.checkCancellation(); guard current == generation else { return }
 
                 let remove = UserDefaults.standard.bool(forKey: "removeSilence"), normalize = UserDefaults.standard.bool(forKey: "normalizeAudio")
+                LaunchTrace.mark("audio-processing-start")
                 let samples = await Task.detached(priority: .userInitiated) { AudioProcessing.apply(rawSamples, removeSilence: remove, normalize: normalize) }.value
+                LaunchTrace.mark("audio-processing-end")
                 guard !samples.isEmpty else { throw SpeechError.audio("No speech detected. Try speaking louder or turn off silence removal.") }
                 LaunchTrace.mark("inference-start")
                 let text = try await engine.transcribe(samples: samples)
@@ -407,6 +421,7 @@ import IOKit.ps
                             try await Task.detached(priority: .userInitiated) {
                                 try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
                             }.value
+                            LaunchTrace.mark("paste-end")
                         } catch FocusError.secure { pasteWarning = "Copied: secure field" }
                         catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
                     } else { pasteWarning = "No focused editable field. The transcription was copied to the clipboard." }

@@ -68,6 +68,6 @@ import Foundation
 
 enum LaunchTrace {
     static func mark(_ stage: String) {
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" || ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { fputs("LightTTS launch: \(stage) uptime=\(ProcessInfo.processInfo.systemUptime)\n", stderr) }
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" || ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { fputs("LightTTS trace: \(stage) mach=\(mach_absolute_time())\n", stderr) }
     }
 }
