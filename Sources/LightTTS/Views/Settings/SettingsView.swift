@@ -58,14 +58,14 @@ struct SettingsView: View {
                 ZStack {
                     Color.black.opacity(colorScheme == .dark ? 0.48 : 0.50).ignoresSafeArea()
                         .background(TitlebarDimmer(opacity: colorScheme == .dark ? 0.48 : 0.50))
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 11) {
                         Text("Delete \(alertName(model))").font(.system(size: 13, weight: .bold))
                         Text(model.engine == "apple" ? "LightTTS will forget this selection; macOS manages the speech assets." : model.engine == "cloud" ? "The model and its API key will be removed." : "Are you sure you want to delete this model?").font(.system(size: 13)).foregroundStyle(.secondary)
                         HStack(spacing: 8) {
                             Button("Cancel") { dialog.deleting = nil }.keyboardShortcut(.cancelAction).buttonStyle(AlertButton(destructive: false))
                             Button("Delete", role: .destructive) { do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }; dialog.deleting = nil }.buttonStyle(AlertButton(destructive: true))
                         }
-                    }.padding(20).frame(width: 260).background(colorScheme == .dark ? Color(red: 35/255, green: 37/255, blue: 40/255) : Color(red: 176/255, green: 179/255, blue: 182/255), in: RoundedRectangle(cornerRadius: 34)).shadow(radius: 18).offset(y: -14)
+                    }.padding(20).frame(width: 260).background(colorScheme == .dark ? Color(red: 18/255, green: 19/255, blue: 23/255) : Color(red: 179/255, green: 180/255, blue: 184/255), in: RoundedRectangle(cornerRadius: 34)).shadow(radius: 18).offset(y: -14)
                 }
             }
         }.onChange(of: selectedModel) { _ in controller.warmSelected() }
@@ -83,9 +83,14 @@ private struct TitlebarDimmer: NSViewRepresentable {
     final class Anchor: NSView {
         var opacity = 0.5
         private var dimmer: Dimmer?
+        private var buttonAlphas: [(NSButton, CGFloat)] = []
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); install() }
         func install() {
             guard let window, let content = window.contentView, let frame = content.superview else { removeDimmer(); return }
+            if buttonAlphas.isEmpty {
+                buttonAlphas = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }.map { ($0, $0.alphaValue) }
+                for (button, alpha) in buttonAlphas { button.alphaValue = alpha * (1 - opacity) }
+            }
             let overlay = dimmer ?? Dimmer()
             overlay.wantsLayer = true
             overlay.layer?.backgroundColor = NSColor.black.withAlphaComponent(opacity).cgColor
@@ -94,7 +99,7 @@ private struct TitlebarDimmer: NSViewRepresentable {
             if overlay.superview !== frame { overlay.removeFromSuperview(); frame.addSubview(overlay, positioned: .above, relativeTo: nil) }
             dimmer = overlay
         }
-        func removeDimmer() { dimmer?.removeFromSuperview(); dimmer = nil }
+        func removeDimmer() { dimmer?.removeFromSuperview(); dimmer = nil; for (button, alpha) in buttonAlphas { button.alphaValue = alpha }; buttonAlphas = [] }
         deinit { removeDimmer() }
     }
     final class Dimmer: NSView {
@@ -106,6 +111,6 @@ private struct AlertButton: ButtonStyle {
     let destructive: Bool
     @Environment(\.colorScheme) private var colorScheme
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 13, weight: .semibold)).foregroundStyle(destructive ? Color.red : Color.primary).frame(maxWidth: .infinity).frame(height: 28).background(destructive ? Color.red.opacity(configuration.isPressed ? 0.3 : (colorScheme == .dark ? 0.18 : 0.14)) : Color.primary.opacity(configuration.isPressed ? 0.2 : 0.12), in: Capsule())
+        configuration.label.font(.system(size: 13, weight: .semibold)).foregroundStyle(destructive ? Color.red : Color.primary).frame(maxWidth: .infinity).frame(height: 28).background(destructive ? (colorScheme == .dark ? Color(red: 37/255, green: 21/255, blue: 22/255) : Color.red.opacity(configuration.isPressed ? 0.3 : 0.14)) : Color.primary.opacity(configuration.isPressed ? 0.2 : 0.12), in: Capsule())
     }
 }
