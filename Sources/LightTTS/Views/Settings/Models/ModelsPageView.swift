@@ -58,7 +58,17 @@ struct ModelsPageView: View {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Search models", text: $ui.query).textFieldStyle(.plain)
                         if !ui.query.isEmpty { Button { ui.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).help("Clear search") }
-                    }.font(.system(size: 13)).padding(.horizontal, 10).frame(width: 220, height: 28).background(colorScheme == .dark ? Color(red: 74/255, green: 76/255, blue: 79/255) : Color(red: 249/255, green: 249/255, blue: 249/255), in: Capsule()).overlay(Capsule().stroke(Color.primary.opacity(0.14), lineWidth: 0.5)).overlay(Capsule().stroke(Color.white.opacity(colorScheme == .light ? 0.65 : 0.10), lineWidth: 0.5).padding(1))
+                    }.font(.system(size: 13)).padding(.horizontal, 10).frame(width: 220, height: 28).background(LinearGradient(stops: colorScheme == .dark ? [
+                        .init(color: Color(red: 74/255, green: 74/255, blue: 82/255), location: 0),
+                        .init(color: Color(red: 68/255, green: 69/255, blue: 74/255), location: 0.35),
+                        .init(color: Color(red: 69/255, green: 72/255, blue: 79/255), location: 0.75),
+                        .init(color: Color(red: 76/255, green: 79/255, blue: 86/255), location: 1)
+                    ] : [
+                        .init(color: Color(white: 249/255), location: 0),
+                        .init(color: Color(white: 241/255), location: 0.35),
+                        .init(color: Color(white: 245/255), location: 0.75),
+                        .init(color: Color(white: 250/255), location: 1)
+                    ], startPoint: .top, endPoint: .bottom), in: Capsule()).overlay(Capsule().stroke(Color.primary.opacity(0.14), lineWidth: 0.5)).overlay(Capsule().stroke(Color.white.opacity(colorScheme == .light ? 0.65 : 0.10), lineWidth: 0.5).padding(1))
                 } else { Button { ui.searching = true } label: { Image(systemName: "magnifyingglass") }.buttonStyle(CircleButton()).help("Search") }
                 Menu { Toggle("Downloaded only", isOn: $ui.installedOnly) } label: { toolbarIcon("line.3.horizontal.decrease") }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.07), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)).help("Filters")
                 Menu { Button("Add cloud model…") { ui.cloud = true }; Button("Add local model…") { ui.custom = true } } label: { Image(nsImage: keyPlusImage) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.07), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)).help("Bring your own key")
