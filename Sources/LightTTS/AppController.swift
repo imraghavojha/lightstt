@@ -25,6 +25,8 @@ import Darwin
     @Published var showAdvanced = false
     @Published var playingHistoryID: UUID?
     @Published var historySegmented = false
+    @Published var reprocessingHistoryID: UUID?
+    @Published var historyProcessingError: (id: UUID, message: String)?
     private var segmentStop: DispatchWorkItem?
     private var historyPlayer: AVAudioPlayer?
     @Published var loginEnabled = false
@@ -155,6 +157,7 @@ import Darwin
             await ModelStore.refreshAppleStatus(); self.objectWillChange.send()
 
         }
+        if UserDefaults.standard.string(forKey: "recordingSound") == "Muffle" { UserDefaults.standard.set("Lower", forKey: "recordingSound") }
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
@@ -165,7 +168,6 @@ import Darwin
         }
         NotificationCenter.default.addObserver(self, selector: #selector(shortcutsChanged), name: .shortcutsChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(shortcutCaptureChanged), name: .shortcutCaptureChanged, object: nil)
-        if UserDefaults.standard.bool(forKey: "autoCheckUpdates") && !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") { checkUpdates(interactive: false) }
         if let index = CommandLine.arguments.firstIndex(of: "--settings-page"), CommandLine.arguments.indices.contains(index + 1) { settingsSelection = CommandLine.arguments[index + 1] }
         if isTestAudio { DistributedNotificationCenter.default().addObserver(self, selector: #selector(testAudioToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(Bundle.main.bundleIdentifier ?? "app")"), object: nil) }
         #if DEBUG
@@ -271,7 +273,7 @@ import Darwin
         }
     }
     func start() {
-        guard state == "idle", historyMigration == nil else { return }
+        guard state == "idle", historyMigration == nil, reprocessingHistoryID == nil else { return }
         unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         state = "starting"
@@ -327,7 +329,7 @@ import Darwin
         let inputID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
         let inputName = inputID.isEmpty ? "System default" : (AVCaptureDevice.devices(for: .audio).first { $0.uniqueID == inputID }?.localizedName ?? "Microphone")
         let processingStart = Date()
-        testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
+        testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; runPendingHistoryReprocess(); if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
 
         processing = Task {
             do {
@@ -377,10 +379,11 @@ import Darwin
                     } else { pasteWarning = "The focused field is unavailable. The transcription was copied to the clipboard." }
                 }
                 if pasteWarning != nil || shouldCopyTranscript(autoPaste: sessionAutoPaste, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) {
-                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+                    writeTranscriptToClipboard(text)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
 
+                if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { hideImmediately() }
                 LaunchTrace.mark("text-inserted")
                 var item = HistoryEntry(text: text, date: recordingDate)
                 item.inputName = inputName; item.recordingDuration = recordDuration; item.modelName = model.name; item.processingDuration = Date().timeIntervalSince(processingStart); item.mode = "Voice to text"
@@ -393,14 +396,18 @@ import Darwin
                     if written { item.audioFile = filename }
                     if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
                 }
-                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
+                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { state = "idle"; scheduleEngineUnload() } else { state = "done" }; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
 
-                try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
+                if state == "done" { try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() } }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
     }
 
-    func cancel() { audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide() }
+    func cancel() { audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide(); runPendingHistoryReprocess() }
+
+    private func hideImmediately() {
+        level = 0; panel?.orderOut(nil); panel = nil
+    }
 
     private func hide() {
         state = "idle"; level = 0
@@ -451,10 +458,11 @@ import Darwin
         unloadTimer = timer
     }
     func fail(_ text: String) {
+        audioSettings.end()
         generation += 1; processing?.cancel(); processing = nil
         _ = audio?.stop(); audio = nil; testAudio = nil; focus = nil; level = 0
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
-        unloadEngine(); message = text; state = "error"; showPanel()
+        unloadEngine(); message = text; state = "error"; showPanel(); runPendingHistoryReprocess()
     }
     private func showPanel() {
         if UserDefaults.standard.string(forKey: "recordingWindow") == "None", state != "error" { return }
@@ -475,18 +483,6 @@ import Darwin
         catch { message = error.localizedDescription }
         refreshLoginStatus()
     }
-    func checkUpdates(interactive: Bool = true) {
-        guard let url = URL(string: "https://api.github.com/repos/imraghavojha/lighttts/releases/latest") else { return }
-        Task {
-            do {
-                let (data, response) = try await URLSession.shared.data(from: url)
-                guard (response as? HTTPURLResponse)?.statusCode == 200, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], let version = object["tag_name"] as? String else { throw URLError(.badServerResponse) }
-                let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-                let newer = version.trimmingCharacters(in: CharacterSet(charactersIn: "vV")).compare(current, options: .numeric) == .orderedDescending
-                if interactive || newer { let alert = NSAlert(); alert.messageText = newer ? "Update available: \(version)" : "LightTTS is up to date"; alert.informativeText = newer ? "Visit the releases page to download the update." : "You have the latest release."; alert.addButton(withTitle: newer ? "Open Releases" : "OK"); if newer { alert.addButton(withTitle: "Later") }; if alert.runModal() == .alertFirstButtonReturn && newer { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/releases/latest")!) } }
-            } catch { if interactive { let alert = NSAlert(); alert.messageText = "Couldn't check for updates"; alert.informativeText = error.localizedDescription; alert.runModal() } }
-        }
-    }
     nonisolated private static func writeRecording(_ samples: [Float], to url: URL) -> Bool {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -499,6 +495,36 @@ import Darwin
         guard let file = item.audioFile, file == item.id.uuidString + ".wav" else { return nil }
         let url = historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true).appendingPathComponent(file)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+    private var pendingHistoryReprocess: HistoryEntry?
+    private func runPendingHistoryReprocess() {
+        guard let item = pendingHistoryReprocess else { return }
+        pendingHistoryReprocess = nil; reprocessingHistoryID = nil; processHistoryAgain(item)
+    }
+    func processHistoryAgain(_ item: HistoryEntry) {
+        guard reprocessingHistoryID == nil, historyMigration == nil, let url = historyAudioURL(item) else { return }
+        reprocessingHistoryID = item.id; historyProcessingError = nil
+        if state == "starting" || state == "recording" { pendingHistoryReprocess = item; return }
+        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+        Task {
+            do {
+                guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
+                let start = Date()
+                let remove = UserDefaults.standard.bool(forKey: "removeSilence"), normalize = UserDefaults.standard.bool(forKey: "normalizeAudio")
+                let samples = try await Task.detached(priority: .userInitiated) { AudioProcessing.apply(try AudioFileReader.read(url), removeSilence: remove, normalize: normalize) }.value
+                let language = UserDefaults.standard.string(forKey: "canaryLanguage." + (model.fallbackID ?? model.id)) ?? "en"
+                let worker = try await HelperEngine.load(model, language: language)
+                defer { (worker as? HelperEngine)?.terminate() }
+                let text = try await worker.transcribe(samples: samples)
+                guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
+                if let index = history.firstIndex(where: { $0.id == item.id }) {
+                    history[index].text = text; history[index].modelName = model.name; history[index].processingDuration = Date().timeIntervalSince(start)
+                    if selectedHistory?.id == item.id { selectedHistory = history[index] }
+                    saveHistory()
+                }
+            } catch { historyProcessingError = (item.id, error.localizedDescription) }
+            reprocessingHistoryID = nil
+        }
     }
     func stopHistoryPlayback() { segmentStop?.cancel(); segmentStop = nil; historyPlayer?.stop(); historyPlayer = nil; playingHistoryID = nil }
     func toggleHistoryPlayback(_ item: HistoryEntry, segment: RecordingSegment? = nil) {
@@ -638,7 +664,7 @@ import Darwin
     }
     func cancelDownload() { downloadTask?.cancel() }
 
-    func prepareToQuit() async { if state != "idle" { cancel() }; unloadEngine(); await audioSettings.waitForRestoration(); await withCheckedContinuation { continuation in historyQueue.async { continuation.resume() } }; let task = downloadTask; task?.cancel(); await task?.value }
+    func prepareToQuit() async { pendingHistoryReprocess = nil; if state != "idle" { cancel() }; audioSettings.end(); unloadEngine(); await audioSettings.waitForRestoration(); await withCheckedContinuation { continuation in historyQueue.async { continuation.resume() } }; let task = downloadTask; task?.cancel(); await task?.value }
 
     func download(_ model: Model) {
         guard busyModel == nil else { return }
@@ -652,7 +678,7 @@ import Darwin
     }
 
 }
-struct HistoryEntry: Codable, Identifiable { var id = UUID(); let text: String; let date: Date; var audioFile: String? = nil; var inputName: String? = nil; var modelName: String? = nil; var recordingDuration: Double? = nil; var processingDuration: Double? = nil; var mode: String? = nil; var segments: [RecordingSegment]? = nil; var waveform: [Float]? = nil }
+struct HistoryEntry: Codable, Identifiable { var id = UUID(); var text: String; let date: Date; var audioFile: String? = nil; var inputName: String? = nil; var modelName: String? = nil; var recordingDuration: Double? = nil; var processingDuration: Double? = nil; var mode: String? = nil; var segments: [RecordingSegment]? = nil; var waveform: [Float]? = nil }
 
 extension AppController: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { Task { @MainActor in self.playingHistoryID = nil } }

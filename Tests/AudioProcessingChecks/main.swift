@@ -6,15 +6,6 @@ let normalized = AudioProcessing.apply([Float](repeating: 0.05, count: 16000), r
 precondition(abs(normalized[0] - 0.12) < 0.001)
 precondition(AudioProcessing.apply([], removeSilence: true, normalize: true).isEmpty)
 print("Audio processing checks passed")
-func filteredRMS(frequency: Float) -> Float {
-    let frames = 4800
-    var signal = (0..<frames).flatMap { i -> [Float] in let v = sin(2 * Float.pi * frequency * Float(i) / 48000); return [v, v] }
-    var filter = StereoLowPass(); filter.prepare(sampleRate: 48000)
-    signal.withUnsafeMutableBufferPointer { filter.process($0.baseAddress!, frameCount: frames, channelCount: 2) }
-    return sqrt(signal.reduce(Float.zero) { $0 + $1 * $1 } / Float(signal.count))
-}
-precondition(filteredRMS(frequency: 5000) < filteredRMS(frequency: 100) * 0.3)
-print("Muffle filter check passed")
 final class FakeMediaController: MediaControlling {
     var currentlyPlaying: [String]
     var pauseCalls = 0
@@ -56,3 +47,20 @@ precondition(AudioProcessing.waveform([]).isEmpty)
 let waveform = AudioProcessing.waveform([Float](repeating: 0.05, count: 3200), bins: 10)
 precondition(waveform.count == 10 && waveform.allSatisfy { $0 > 0 && $0 <= 1 })
 print("Waveform checks passed")
+final class FakeVolume: OutputVolumeControlling {
+    var values: [UInt32: Float] = [1: 0.8, 2: 0.4]
+    func volumes() -> [(UInt32, Float)] { values.sorted { $0.key < $1.key }.map { ($0.key, $0.value) } }
+    func setVolume(_ value: Float, channel: UInt32) { values[channel] = value }
+}
+for factor: Float in [0, 0.3] {
+    let output = FakeVolume(), session = OutputVolumeSession(controller: output)
+    session.begin(factor: factor); session.begin(factor: factor)
+    precondition(abs(output.values[1]! - 0.8 * factor) < 0.0001 && abs(output.values[2]! - 0.4 * factor) < 0.0001)
+    session.end(); session.end()
+    precondition(output.values[1] == 0.8 && output.values[2] == 0.4)
+}
+print("Output volume restoration checks passed")
+
+let changedOutput = FakeVolume(), changedSession = OutputVolumeSession(controller: changedOutput)
+changedSession.begin(factor: 0.3); changedOutput.values[1] = 0.5; changedSession.end()
+precondition(changedOutput.values[1] == 0.5 && changedOutput.values[2] == 0.4)

@@ -1,14 +1,6 @@
 {
   "pins" : [
     {
-      "identity" : "coreaudiotapkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/CJStanfield/CoreAudioTapKit.git",
-      "state" : {
-        "revision" : "aab395f1e8e5dd1bd369c3bbfcf5c6bdca85e099"
-      }
-    },
-    {
       "identity" : "fluidaudio",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidInference/FluidAudio.git",

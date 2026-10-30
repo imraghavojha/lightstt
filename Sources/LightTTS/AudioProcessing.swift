@@ -62,17 +62,3 @@ enum AudioProcessing {
     }
 }
 
-struct StereoLowPass {
-    private var alpha: Float = 0.1
-    private var left: Float = 0
-    private var right: Float = 0
-    mutating func prepare(sampleRate: Double) { alpha = Float(1 - exp(-2 * Double.pi * 700 / sampleRate)); left = 0; right = 0 }
-    mutating func process(_ samples: UnsafeMutablePointer<Float>, frameCount: Int, channelCount: Int) {
-        guard channelCount == 2 else { return }
-        for frame in 0..<frameCount {
-            let index = frame * 2
-            left += alpha * (samples[index] - left); right += alpha * (samples[index + 1] - right)
-            samples[index] = left * 0.3; samples[index + 1] = right * 0.3
-        }
-    }
-}

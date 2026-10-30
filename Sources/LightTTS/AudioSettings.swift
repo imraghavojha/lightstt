@@ -1,19 +1,14 @@
 import AppKit
 import CoreAudio
 import AudioToolbox
-import CoreAudioTapKit
-import IOKit.hidsystem
 
 final class AudioSettings {
-    private var output: AudioDeviceID = 0
-    private var previousVolume: Float32?
-    private var changedVolume: Float32?
+    private var volumeSession: OutputVolumeSession?
     private let pauseSession: MediaPauseSession
     init(media: any MediaControlling = SystemMediaController()) {
         pauseSession = MediaPauseSession(controller: (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty ? media : NoopMediaController())
     }
-    private let muffleQueue = DispatchQueue(label: "com.lighttts.muffle")
-    private var muffleSession: AnyObject?
+    private let volumeQueue = DispatchQueue(label: "com.lighttts.volume")
 
     static func device(for uid: String, scope: AudioObjectPropertyScope) -> AudioDeviceID? {
         if uid.isEmpty { return defaultDevice(scope: scope) }
@@ -46,6 +41,22 @@ final class AudioSettings {
         }
         return nil
     }
+    fileprivate static func outputVolumes(_ device: AudioDeviceID) -> [(AudioObjectPropertyElement, Float32)] {
+        func read(_ element: AudioObjectPropertyElement) -> Float32? {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: kAudioDevicePropertyScopeOutput, mElement: element)
+            var settable: DarwinBoolean = false
+            guard AudioObjectHasProperty(device, &address), AudioObjectIsPropertySettable(device, &address, &settable) == noErr, settable.boolValue else { return nil }
+            var value: Float32 = 0, size = UInt32(MemoryLayout<Float32>.size)
+            return AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr ? value : nil
+        }
+        if let master = read(0) { return [(0, master)] }
+        return [1, 2].compactMap { element in read(element).map { (element, $0) } }
+    }
+    fileprivate static func setOutputVolume(_ device: AudioDeviceID, element: AudioObjectPropertyElement, value: Float32) {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: kAudioDevicePropertyScopeOutput, mElement: element)
+        var value = value
+        _ = AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
+    }
     func begin() -> String? {
         let defaults = UserDefaults.standard
         let testAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
@@ -55,36 +66,22 @@ final class AudioSettings {
             do { try pauseSession.begin() }
             catch { return "Couldn't pause media: \(error.localizedDescription)" }
         }
-        if ["Muffle", "Mute", "Lower"].contains(mode) {
-            muffleQueue.async { [self] in
-                if mode == "Muffle", !testAudio, #available(macOS 14.2, *) {
-                    do {
-                        let session = MuffleSession(); try session.start(); self.muffleSession = session
-                        if CommandLine.arguments.contains("--ui-fixture") { UserDefaults.standard.set("active", forKey: "muffleTestStatus") }
-                        return
-                    } catch {
-                        if CommandLine.arguments.contains("--ui-fixture") { UserDefaults.standard.set("fallback: \(error.localizedDescription)", forKey: "muffleTestStatus") }
-                    }
-                }
-                if let device = Self.defaultDevice(scope: kAudioDevicePropertyScopeOutput), let volume = Self.volume(device, scope: kAudioDevicePropertyScopeOutput) {
-                    self.output = device; self.previousVolume = volume; self.changedVolume = mode == "Mute" ? 0 : volume * 0.3
-                    _ = Self.volume(device, scope: kAudioDevicePropertyScopeOutput, set: self.changedVolume)
-                }
+        if ["Mute", "Lower"].contains(mode), !testAudio {
+            volumeQueue.async { [self] in
+                guard let device = Self.defaultDevice(scope: kAudioDevicePropertyScopeOutput) else { return }
+                let session = OutputVolumeSession(controller: SystemOutputVolume(device: device)); self.volumeSession = session
+                session.begin(factor: mode == "Mute" ? 0 : 0.3)
             }
         }
         return nil
     }
     func end() {
-        muffleQueue.async { [self] in
-            if #available(macOS 14.2, *), let session = self.muffleSession as? MuffleSession { session.stop() }
-            self.muffleSession = nil
-            if CommandLine.arguments.contains("--ui-fixture") { UserDefaults.standard.set("stopped", forKey: "muffleTestStatus") }
-            if let previousVolume = self.previousVolume, let changedVolume = self.changedVolume, let current = Self.volume(self.output, scope: kAudioDevicePropertyScopeOutput), abs(current - changedVolume) < 0.01 { _ = Self.volume(self.output, scope: kAudioDevicePropertyScopeOutput, set: previousVolume) }
-            self.previousVolume = nil; self.changedVolume = nil
+        volumeQueue.async { [self] in
+            self.volumeSession?.end(); self.volumeSession = nil
         }
         pauseSession.end()
     }
-    func waitForRestoration() async { await withCheckedContinuation { continuation in muffleQueue.async { continuation.resume() } } }
+    func waitForRestoration() async { await withCheckedContinuation { continuation in volumeQueue.async { continuation.resume() } } }
     static func cue(start: Bool) {
         guard (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty else { return }
         let defaults = UserDefaults.standard
@@ -94,26 +91,59 @@ final class AudioSettings {
     }
 }
 
-@available(macOS 14.2, *)
-private final class MuffleSession {
-    private let processor = LowPassProcessor()
-    private lazy var engine = SystemAudioTapEngine(processor: processor)
-    func start() throws {
-        guard let device = try AudioDevices.defaultOutput() else { throw NSError(domain: "LightTTS.Audio", code: 1) }
-        try engine.start(outputUID: device.uid)
-    }
-    func stop() { engine.stop() }
+private struct SystemOutputVolume: OutputVolumeControlling {
+    let device: AudioDeviceID
+    func volumes() -> [(UInt32, Float)] { AudioSettings.outputVolumes(device) }
+    func setVolume(_ value: Float, channel: UInt32) { AudioSettings.setOutputVolume(device, element: channel, value: value) }
 }
-@available(macOS 14.2, *)
-private final class LowPassProcessor: AudioProcessor {
-    private var filter = StereoLowPass()
-    func prepare(sampleRate: Double) { filter.prepare(sampleRate: sampleRate) }
-    func process(_ samples: UnsafeMutablePointer<Float>, frameCount: Int, channelCount: Int) { filter.process(samples, frameCount: frameCount, channelCount: channelCount) }
-}
-
-// There is no reliable, permission-free public API for identifying the current
-// media-key target and confirming its state. Do not send a blind toggle.
+// MediaRemote provides the system media-key target without Apple Events.
 private struct SystemMediaController: MediaControlling {
-    func pausePlaying() throws -> [String] { [] }
-    func resume(_ players: [String]) {}
+    private static let framework = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
+    private typealias IsPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (Bool) -> Void) -> Void
+    private typealias GetClient = @convention(c) (DispatchQueue, @escaping @convention(block) (UnsafeRawPointer?) -> Void) -> Void
+    private typealias GetBundle = @convention(c) (UnsafeRawPointer) -> Unmanaged<CFString>?
+    private typealias GetPID = @convention(c) (UnsafeRawPointer) -> Int32
+    private typealias SendCommand = @convention(c) (UInt32, CFDictionary?) -> Bool
+
+    private func target() -> String? {
+        guard let handle = Self.framework,
+              let querySymbol = dlsym(handle, "MRMediaRemoteGetNowPlayingClient"),
+              let bundleSymbol = dlsym(handle, "MRNowPlayingClientGetBundleIdentifier"),
+              let pidSymbol = dlsym(handle, "MRNowPlayingClientGetProcessIdentifier") else { return nil }
+        let query = unsafeBitCast(querySymbol, to: GetClient.self)
+        let bundle = unsafeBitCast(bundleSymbol, to: GetBundle.self)
+        let pid = unsafeBitCast(pidSymbol, to: GetPID.self)
+        let semaphore = DispatchSemaphore(value: 0), lock = NSLock()
+        var identity: String?
+        query(DispatchQueue.global()) { client in
+            if let client, let identifier = bundle(client)?.takeUnretainedValue() as String?, !identifier.isEmpty {
+                let process = pid(client)
+                if process > 0 { lock.lock(); identity = "\(identifier):\(process)"; lock.unlock() }
+            }
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + 1) == .success else { return nil }
+        lock.lock(); defer { lock.unlock() }; return identity
+    }
+    private func isPlaying() -> Bool? {
+        guard let handle = Self.framework, let symbol = dlsym(handle, "MRMediaRemoteGetNowPlayingApplicationIsPlaying") else { return nil }
+        let query = unsafeBitCast(symbol, to: IsPlaying.self)
+        let semaphore = DispatchSemaphore(value: 0), lock = NSLock()
+        var playing = false
+        query(DispatchQueue.global()) { value in lock.lock(); playing = value; lock.unlock(); semaphore.signal() }
+        guard semaphore.wait(timeout: .now() + 1) == .success else { return nil }
+        lock.lock(); defer { lock.unlock() }; return playing
+    }
+    private func send(_ command: UInt32) -> Bool {
+        guard let handle = Self.framework, let symbol = dlsym(handle, "MRMediaRemoteSendCommand") else { return false }
+        return unsafeBitCast(symbol, to: SendCommand.self)(command, nil)
+    }
+    func pausePlaying() throws -> [String] {
+        guard let identity = target(), isPlaying() == true, target() == identity, send(1) else { return [] }
+        return [identity]
+    }
+    func resume(_ players: [String]) {
+        guard let identity = players.first, target() == identity, isPlaying() == false, target() == identity else { return }
+        _ = send(0)
+    }
 }
