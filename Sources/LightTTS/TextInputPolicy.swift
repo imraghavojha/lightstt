@@ -14,9 +14,9 @@ enum FocusError: LocalizedError {
     }
 }
 
-func focusDisposition(role: String?, subrole: String?, secureInput: Bool) -> FocusDisposition {
+func focusDisposition(role: String?, subrole: String?, secureInput: Bool, editable: Bool = false, selectedRangeSettable: Bool = false) -> FocusDisposition {
     if secureInput || role == "AXSecureTextField" || subrole == "AXSecureTextField" { return .secure }
-    guard let role, ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(role) else { return .unavailable }
+    guard let role, ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(role) || editable || (role == "AXWebArea" && selectedRangeSettable) else { return .unavailable }
     return .editable
 }
 

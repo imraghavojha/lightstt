@@ -26,7 +26,7 @@ struct RecordingView: View {
                 Image(systemName: "exclamationmark.circle").font(.system(size: 13)).foregroundStyle(.white)
                     .help(controller.message)
                 Text(controller.message).font(.system(size: 11)).foregroundStyle(.white)
-                    .lineLimit(2).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true).truncationMode(.tail).frame(maxWidth: 290, alignment: .leading)
                     .help(controller.message).padding(.leading, 4)
                 Button(action: { controller.cancel() }) {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
@@ -42,14 +42,16 @@ struct RecordingView: View {
             if !Task.isCancelled && controller.state == "error" { controller.cancel() }
         }
         .padding(.horizontal, controller.state == "error" ? 14 : 0)
-        .frame(width: idle ? 45 : (controller.state == "error" ? 220 : (controller.state == "loading" ? 120 : 60)), height: idle ? 8 : (controller.state == "error" ? 56 : 32))
+        .padding(.vertical, controller.state == "error" ? 12 : 0)
+        .frame(width: controller.state == "error" ? nil : (idle ? 45 : (controller.state == "loading" ? 120 : 60)), height: controller.state == "error" ? nil : (idle ? 8 : 32))
+        .frame(minHeight: controller.state == "error" ? 56 : nil)
         .background(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255), in: Capsule())
         .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 1))
         .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)
         .offset(y: idle ? 0 : -9.5)
         .animation(.easeOut(duration: 0.15), value: idle)
         .animation(.easeOut(duration: 0.08), value: level.value)
-        .frame(width: 240, height: 160)
+        .frame(width: 380, height: 160)
         .accessibilityLabel(controller.state == "error" ? controller.message : controller.state.capitalized)
     }
 }

@@ -13,4 +13,4 @@ extension Bundle {
 SWIFT
 swiftc -parse-as-library -I "$BIN" "$BIN/LightTTSCore.o" $(find Sources/LightTTS -name '*.swift' ! -name LightTTSApp.swift) "$TMP/resource_bundle_accessor.swift" Tests/LightTTSTests/HelperFailureChecks.swift -o "$TMP/checks"
 cp -R "$BIN/LightTTS_LightTTSCore.bundle" "$BIN/LightTTS_LightTTS.bundle" "$TMP/"
-"$TMP/checks" --ui-fixture
+LIGHTTTS_TEST_SUPPRESS_PANEL=1 "$TMP/checks" --ui-fixture

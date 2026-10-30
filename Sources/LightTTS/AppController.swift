@@ -491,13 +491,14 @@ import IOKit.ps
     }
     private func preparePanel() {
         if panel == nil {
-            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
             p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
             p.contentView = NSHostingView(rootView: RecordingView(controller: self)); panel = p
             p.contentView?.layoutSubtreeIfNeeded()
         }
     }
     private func showPanel() {
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_SUPPRESS_PANEL"] == "1" { return }
         if UserDefaults.standard.string(forKey: "recordingWindow") == "None", state != "error" { return }
         preparePanel()
         if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70));

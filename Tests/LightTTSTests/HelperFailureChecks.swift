@@ -16,6 +16,10 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         precondition(focusDisposition(role: "AXButton", subrole: nil, secureInput: false) == .unavailable)
         precondition(focusDisposition(role: nil, subrole: nil, secureInput: false) == .unavailable)
         precondition(focusDisposition(role: "AXTextArea", subrole: nil, secureInput: false) == .editable)
+        precondition(focusDisposition(role: "AXWebArea", subrole: nil, secureInput: false, selectedRangeSettable: true) == .editable)
+        precondition(focusDisposition(role: "AXWebArea", subrole: nil, secureInput: false) == .unavailable)
+        precondition(focusDisposition(role: "AXGroup", subrole: nil, secureInput: false, editable: true) == .editable)
+        precondition(focusDisposition(role: "AXWebArea", subrole: "AXSecureTextField", secureInput: false, editable: true) == .secure)
         var chunks: [String] = []
         do {
             try typeInChunks(String(repeating: "a", count: 70), expectedPID: 1, currentPID: { chunks.isEmpty ? 1 : 2 }) { chunks.append($0) }
