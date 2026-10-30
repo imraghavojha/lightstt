@@ -19,19 +19,19 @@ struct SettingsView: View {
     private var dark: Bool { effectiveTheme == "Dark" || (effectiveTheme == "Auto" && scheme == .dark) }
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(SettingsTab.allCases, id: \.rawValue) { tab in
                     Button { controller.selectSettings(tab.rawValue) } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 5) {
                             Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white).frame(width: 20, height: 20).background(Color(white: 0.32).gradient, in: RoundedRectangle(cornerRadius: 5))
-                            Text(tab.rawValue).font(.system(size: 14, weight: .medium))
+                            Text(tab.rawValue).font(.system(size: 13, weight: .medium))
                             Spacer()
                         }.padding(.horizontal, 8).frame(height: 35).background(controller.settingsSelection == tab.rawValue ? (dark ? Color.white.opacity(0.16) : Color.white.opacity(0.65)) : .clear, in: RoundedRectangle(cornerRadius: 10))
                     }.buttonStyle(.plain)
                 }
                 Spacer()
                 Button(attached ? "Detach into window" : "Back to menu", action: detach).buttonStyle(.plain).foregroundStyle(.secondary).font(.system(size: 12)).padding(8)
-            }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 185).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 59/255, green: 62/255, blue: 69/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
+            }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 59/255, green: 62/255, blue: 69/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
             VStack(spacing: 0) {
                 HStack {
@@ -39,14 +39,14 @@ struct SettingsView: View {
                         Button { if controller.selectedHistory != nil { controller.stopHistoryPlayback(); controller.selectedHistory = nil } else { controller.leaveLibrary() } } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain)
                     }
                     if let item = controller.selectedHistory, controller.settingsSelection == "Library" { Spacer(); Text(item.date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: "en_US")))).font(.system(size: 14, weight: .bold)); Spacer() }
-                    else { Text(controller.settingsSelection).font(.system(size: 14, weight: .bold)); Spacer() }
+                    else { Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer() }
                     if controller.settingsSelection == "Library" {
                         if controller.selectedHistory != nil { Color.clear.frame(width: 28, height: 28) }
                         else if controller.historySearchVisible {
                             HStack(spacing: 6) { Image(systemName: "magnifyingglass"); TextField("Search history", text: $controller.historySearch).textFieldStyle(.plain); Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }.padding(.horizontal, 9).frame(width: 220, height: 28).background(Color.primary.opacity(0.09), in: Capsule())
                         } else { Button { controller.historySearchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).help("Search recordings") }
                     } else {
-                        Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDevice") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDevice") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).help("Select microphone")
+                        Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).help("Select microphone")
                     }
                 }.padding(.horizontal, 16).frame(height: 48)
                 switch controller.settingsSelection {
@@ -56,7 +56,7 @@ struct SettingsView: View {
                 default: ConfigurationPageView(controller: controller)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 44/255, green: 47/255, blue: 52/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
-        }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(nsColor: .labelColor)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
+        }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(white: 0.30)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
     }
 }
 
@@ -65,14 +65,14 @@ struct ModelsPageView: View { var body: some View { Spacer() } }
 private struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
     @ViewBuilder var content: Content
-    var body: some View { VStack(spacing: 0) { content }.padding(.horizontal, 16).background(scheme == .dark ? Color(red: 60/255, green: 63/255, blue: 67/255) : Color(white: 253/255), in: RoundedRectangle(cornerRadius: 18)).overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.08))) }
+    var body: some View { VStack(spacing: 0) { content }.padding(.horizontal, 16).background(scheme == .dark ? Color(red: 60/255, green: 63/255, blue: 67/255) : Color(white: 253/255), in: RoundedRectangle(cornerRadius: 18)).overlay(RoundedRectangle(cornerRadius: 18) .stroke(Color.primary.opacity(0.05), lineWidth: 0.5)) }
 }
 private struct ReferenceSwitchStyle: ToggleStyle {
     let label: String
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         Button { configuration.isOn.toggle() } label: {
-            Capsule().fill(configuration.isOn ? Color(red: 228/255, green: 92/255, blue: 156/255) : Color.primary.opacity(0.16))
+            Capsule().fill(configuration.isOn ? Color(red: 246/255, green: 79/255, blue: 158/255) : Color.primary.opacity(0.16))
                 .overlay(Circle().fill(Color.white).frame(width: 16, height: 16).shadow(color: .black.opacity(0.18), radius: 1, y: 1).offset(x: configuration.isOn ? 7 : -7))
                 .frame(width: 34, height: 20).opacity(enabled ? 1 : 0.5)
         }.buttonStyle(.plain).accessibilityLabel(label).accessibilityValue(configuration.isOn ? "On" : "Off")
@@ -105,13 +105,13 @@ private struct SoundPageView: View {
                         ForEach(["Keep Playing", "Pause", "Mute", "Lower", "Muffle"], id: \.self) { value in Button(value) { recordingSound = value } }
                     } label: {
                         HStack(spacing: 8) { Image(systemName: recordingSound == "Pause" ? "pause.circle" : recordingSound == "Mute" ? "speaker.slash" : "speaker.wave.2"); Text(recordingSound); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }.padding(.horizontal, 9)
-                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause uses the system media control; Muffle lowers volume if system audio capture is unavailable.")
+                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause leaves playback unchanged when its state cannot be confirmed; Muffle lowers volume if system audio capture is unavailable.")
                 }
                 Divider()
                 HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.frame(minHeight: 48)
             }
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.secondary) }
-        }.padding(.horizontal, 24).padding(.top, 16) }.font(.system(size: 14))
+        }.padding(.horizontal, 24).padding(.top, 16) }.font(.system(size: 13))
     }
     private func playSound(start: Bool) { AudioSettings.cue(start: start) }
 }
@@ -123,11 +123,11 @@ private struct SoundVolumeSlider: View {
             let trackWidth = max(1, geometry.size.width - 20)
             ZStack(alignment: .leading) {
                 Capsule().fill(dark ? Color(white: 0.40) : Color(white: 0.86)).frame(width: trackWidth, height: 6).offset(x: 10)
-                if !dark { Capsule().fill(Color(red: 228/255, green: 92/255, blue: 156/255)).frame(width: max(0, trackWidth * value), height: 6).offset(x: 10) }
-                HStack { ForEach(0..<9) { index in Circle().fill(Color.primary.opacity(0.16)).frame(width: 2, height: 2); if index < 8 { Spacer() } } }.padding(.horizontal, 10).offset(y: 12)
-                Circle().fill(dark ? Color(white: 0.88) : Color.white).frame(width: 20, height: 20).shadow(color: .black.opacity(0.12), radius: 1, y: 1).offset(x: trackWidth * value)
+                if !dark { Capsule().fill(Color(red: 246/255, green: 79/255, blue: 158/255)).frame(width: max(0, trackWidth * value), height: 6).offset(x: 10) }
+                HStack { ForEach(0..<9) { index in Circle().fill(Color.primary.opacity(0.16)).frame(width: 2, height: 2); if index < 8 { Spacer() } } }.padding(.horizontal, 10).offset(y: 7)
+                Capsule().fill(dark ? Color(white: 0.88) : Color.white).frame(width: 20, height: 16).shadow(color: .black.opacity(0.12), radius: 1, y: 1).offset(x: trackWidth * value)
             }.frame(maxHeight: .infinity).contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { point in value = min(1, max(0, (point.location.x - 10) / trackWidth)) })
-        }.frame(width: 202, height: 28).accessibilityElement().accessibilityLabel("Volume").accessibilityValue("\(Int(value * 100)) percent").accessibilityAdjustableAction { direction in if direction == .increment { value = min(1, value + 0.05) } else if direction == .decrement { value = max(0, value - 0.05) } }
+        }.frame(width: 211, height: 28).accessibilityElement().accessibilityLabel("Volume").accessibilityValue("\(Int(value * 100)) percent").accessibilityAdjustableAction { direction in if direction == .increment { value = min(1, value + 0.05) } else if direction == .decrement { value = max(0, value - 0.05) } }
     }
 }
 private struct LibraryPageView: View {
@@ -194,7 +194,7 @@ private struct ConfigurationPageView: View {
     @ObservedObject var controller: AppController
     @AppStorage("theme") private var theme = "Auto"
     @AppStorage("recordingWindow") private var recordingWindow = "Classic"
-    @AppStorage("alwaysShowRecording") private var alwaysShow = false
+    @AppStorage("alwaysShowRecordingWindow") private var alwaysShow = false
     @AppStorage("hotkeyCode") private var hotkeyCode = 49
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers = Int(NSEvent.ModifierFlags.option.rawValue)
     @AppStorage("cancelHotkeyCode") private var cancelHotkeyCode = 53
@@ -205,7 +205,7 @@ private struct ConfigurationPageView: View {
     @AppStorage("pushToTalk") private var pushToTalk = false
     @AppStorage("rightOption") private var rightOption = false
     @AppStorage("restoreClipboard") private var restoreClipboard = true
-    @AppStorage("pasteResult") private var pasteResult = true
+    @AppStorage("autoPaste") private var pasteResult = true
     @AppStorage("sendOnShift") private var sendOnShift = false
     @AppStorage("simulateTyping") private var simulateTyping = false
     @AppStorage("removeSilence") private var removeSilence = false

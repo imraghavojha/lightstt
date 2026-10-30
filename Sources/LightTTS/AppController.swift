@@ -49,6 +49,7 @@ import ServiceManagement
     private var mouseStart: Date?
     private var mouseOwnsRecording = false
     private var generation = 0
+    private let historyQueue = DispatchQueue(label: "com.lighttts.history", qos: .utility)
     private let historyURL = (CommandLine.arguments.contains("--ui-fixture") || !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty) ? FileManager.default.temporaryDirectory.appendingPathComponent("LightTTS-Fixture", isDirectory: true).appendingPathComponent("history.json") : ModelStore.directory.deletingLastPathComponent().appendingPathComponent("history.json")
     override init() {
         super.init()
@@ -188,6 +189,7 @@ import ServiceManagement
                 do { testAudio = try AudioFileReader.read(URL(fileURLWithPath: path)); started = Date(); state = "recording"; showPanel() } catch { fail(error.localizedDescription) }
                 return
             }
+            #endif
             let allowed: Bool
             if isTestAudio { allowed = true } else { allowed = await AVCaptureDevice.requestAccess(for: .audio) }
             guard current == generation, state == "starting" else { return }
@@ -205,7 +207,7 @@ import ServiceManagement
         guard state == "recording" else { return }
         let rawSamples = testAudio ?? audio?.stop() ?? []
         let recordingDate = started, recordDuration = Double(rawSamples.count) / 16000
-        let inputID = UserDefaults.standard.string(forKey: "inputDevice") ?? ""
+        let inputID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
         let inputName = inputID.isEmpty ? "System default" : (AVCaptureDevice.devices(for: .audio).first { $0.uniqueID == inputID }?.localizedName ?? "Microphone")
         let processingStart = Date()
         testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
@@ -255,9 +257,9 @@ import ServiceManagement
                     let filename = item.id.uuidString + ".wav"
                     let written = await Task.detached(priority: .utility) { Self.writeRecording(rawSamples, to: directory.appendingPathComponent(filename)) }.value
                     if written { item.audioFile = filename }
-                    if Task.isCancelled || current != generation { if written { try? FileManager.default.removeItem(at: directory.appendingPathComponent(filename)) }; return }
+                    if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
                 }
-                history.insert(item, at: 0); if history.count > 500 { for old in history.dropFirst(500) { if let url = historyAudioURL(old) { try? FileManager.default.removeItem(at: url) } }; history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
+                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
@@ -276,6 +278,7 @@ import ServiceManagement
             }
         }
     }
+    func refreshRecordingWindow() { if state != "idle" || UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() } else { panel?.orderOut(nil) } }
     func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; level = 0; showPanel() }
     private func fail(_ text: String) { message = text; state = "error"; showPanel() }
     private func showPanel() {
@@ -289,7 +292,7 @@ import ServiceManagement
             if !p.isVisible { p.alphaValue = 0; p.orderFrontRegardless(); NSAnimationContext.runAnimationGroup { context in context.duration = 0.15; p.animator().alphaValue = 1 } }
             else { p.alphaValue = 1 } }
     }
-    func pruneHistory() { let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; for item in removed { if let url = historyAudioURL(item) { try? FileManager.default.removeItem(at: url) } }; history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
+    func pruneHistory() { let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; deleteRecordings(removed); history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
     func refreshLoginStatus() { loginEnabled = SMAppService.mainApp.status == .enabled }
     func setLoginEnabled(_ enabled: Bool) {
         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
@@ -334,8 +337,22 @@ import ServiceManagement
         } catch { message = error.localizedDescription }
     }
     func revealHistory(_ item: HistoryEntry) { NSWorkspace.shared.activateFileViewerSelecting([historyAudioURL(item) ?? historyURL]) }
-    func deleteHistory(_ id: UUID) { if playingHistoryID == id { stopHistoryPlayback() }; if let item = history.first(where: { $0.id == id }), let url = historyAudioURL(item) { try? FileManager.default.removeItem(at: url) }; history.removeAll { $0.id == id }; saveHistory() }
-    private func saveHistory() { try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true); if let data = try? JSONEncoder().encode(history) { try? data.write(to: historyURL, options: .atomic) } }
+    func deleteHistory(_ id: UUID) { if playingHistoryID == id { stopHistoryPlayback() }; if let item = history.first(where: { $0.id == id }) { deleteRecordings([item]) }; history.removeAll { $0.id == id }; saveHistory() }
+    private func deleteRecordings(_ entries: [HistoryEntry]) {
+        let directory = historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true)
+        let names = entries.compactMap { item -> String? in
+            guard let name = item.audioFile, name == item.id.uuidString + ".wav" else { return nil }
+            return name
+        }
+        historyQueue.async { for name in names { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) } }
+    }
+    private func saveHistory() {
+        let snapshot = history, url = historyURL
+        historyQueue.async {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: url, options: .atomic) }
+        }
+    }
     func importLocalModel() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.data]; panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -364,7 +381,7 @@ import ServiceManagement
         } catch { message = error.localizedDescription }
     }
     func cancelDownload() { downloadTask?.cancel() }
-    func prepareToQuit() async { if state != "idle" { cancel() }; await audioSettings.waitForRestoration(); let task = downloadTask; task?.cancel(); await task?.value }
+    func prepareToQuit() async { if state != "idle" { cancel() }; await audioSettings.waitForRestoration(); await withCheckedContinuation { continuation in historyQueue.async { continuation.resume() } }; let task = downloadTask; task?.cancel(); await task?.value }
     func download(_ model: Model) {
         guard busyModel == nil else { return }
         busyModel = model.id; downloadProgress = 0

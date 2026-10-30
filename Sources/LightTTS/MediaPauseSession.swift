@@ -18,10 +18,3 @@ struct NoopMediaController: MediaControlling {
     func pausePlaying() throws -> [String] { [] }
     func resume(_ players: [String]) {}
 }
-
-struct ActivityGatedMediaController: MediaControlling {
-    let isOutputRunning: () -> Bool
-    let toggle: () -> Void
-    func pausePlaying() throws -> [String] { guard isOutputRunning() else { return [] }; toggle(); return ["system"] }
-    func resume(_ players: [String]) { if !players.isEmpty { toggle() } }
-}

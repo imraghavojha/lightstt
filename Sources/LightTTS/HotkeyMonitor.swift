@@ -43,8 +43,8 @@ import AVFoundation
             return true
         }
         let code = event.getIntegerValueField(.keyboardEventKeycode)
-        if type == .keyDown && code == (UserDefaults.standard.object(forKey: "cancelHotkeyCode") as? Int ?? 53) { DispatchQueue.main.async { self.onEscape?() }; return false }
         let flags = event.flags.intersection([.maskAlternate, .maskShift, .maskControl, .maskCommand])
+        if type == .keyDown && flags.isEmpty && code == (UserDefaults.standard.object(forKey: "cancelHotkeyCode") as? Int ?? 53) { DispatchQueue.main.async { self.onEscape?() }; return false }
         if UserDefaults.standard.bool(forKey: "pushShortcutEnabled"), code == (UserDefaults.standard.object(forKey: "pushHotkeyCode") as? Int ?? 49), type == .keyDown || type == .keyUp {
             let required = CGEventFlags(rawValue: UInt64(UserDefaults.standard.object(forKey: "pushHotkeyModifiers") as? Int ?? Int(NSEvent.ModifierFlags.option.union(.shift).rawValue)))
             if type == .keyDown && flags == required { if !pushActive { pushActive = true; DispatchQueue.main.async { self.onPush?(true) } }; return true }

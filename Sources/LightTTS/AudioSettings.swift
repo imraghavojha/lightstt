@@ -50,7 +50,7 @@ final class AudioSettings {
     func begin() -> String? {
         let defaults = UserDefaults.standard
         let testAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
-        if !testAudio, defaults.bool(forKey: "increaseMicVolume"), let input = Self.device(for: defaults.string(forKey: "inputDevice") ?? "", scope: kAudioDevicePropertyScopeInput) { _ = Self.volume(input, scope: kAudioDevicePropertyScopeInput, set: 1) }
+        if !testAudio, defaults.bool(forKey: "increaseMicVolume"), let input = Self.device(for: defaults.string(forKey: "inputDeviceUID") ?? "", scope: kAudioDevicePropertyScopeInput) { _ = Self.volume(input, scope: kAudioDevicePropertyScopeInput, set: 1) }
         let mode = defaults.string(forKey: "recordingSound") ?? "Pause"
         if mode == "Pause" {
             do { try pauseSession.begin() }
@@ -112,21 +112,9 @@ private final class LowPassProcessor: AudioProcessor {
     func process(_ samples: UnsafeMutablePointer<Float>, frameCount: Int, channelCount: Int) { filter.process(samples, frameCount: frameCount, channelCount: channelCount) }
 }
 
+// There is no reliable, permission-free public API for identifying the current
+// media-key target and confirming its state. Do not send a blind toggle.
 private struct SystemMediaController: MediaControlling {
-    func pausePlaying() throws -> [String] { try ActivityGatedMediaController(isOutputRunning: outputIsRunning, toggle: sendMediaKey).pausePlaying() }
-    func resume(_ players: [String]) { ActivityGatedMediaController(isOutputRunning: outputIsRunning, toggle: sendMediaKey).resume(players) }
-    private func outputIsRunning() -> Bool {
-        var property = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var device: AudioDeviceID = 0; var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &property, 0, nil, &size, &device) == noErr else { return false }
-        property = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var running: UInt32 = 0; size = UInt32(MemoryLayout<UInt32>.size)
-        return AudioObjectGetPropertyData(device, &property, 0, nil, &size, &running) == noErr && running != 0
-    }
-    private func sendMediaKey() {
-        for state in [0xA, 0xB] {
-            let data = (Int(NX_KEYTYPE_PLAY) << 16) | (state << 8)
-            NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, subtype: 8, data1: data, data2: -1)?.cgEvent?.post(tap: .cghidEventTap)
-        }
-    }
+    func pausePlaying() throws -> [String] { [] }
+    func resume(_ players: [String]) {}
 }

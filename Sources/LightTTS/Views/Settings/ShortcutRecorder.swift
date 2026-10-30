@@ -30,7 +30,7 @@ final class ShortcutButton: NSButton {
     override func keyDown(with event: NSEvent) {
         guard recording else { super.keyDown(with: event); return }
         let flags = event.modifierFlags.intersection([.option, .command, .control, .shift])
-        if modifiersKey != nil && flags.isEmpty { NSSound.beep(); return }
+        if (modifiersKey != nil && flags.isEmpty) || (modifiersKey == nil && !flags.isEmpty) { NSSound.beep(); return }
         SettingsDefaults.store.set(Int(event.keyCode), forKey: codeKey)
         if let enabledKey { SettingsDefaults.store.set(true, forKey: enabledKey) }
         if let modifiersKey { SettingsDefaults.store.set(Int(flags.rawValue), forKey: modifiersKey); SettingsDefaults.store.set(false, forKey: "rightOption") }
