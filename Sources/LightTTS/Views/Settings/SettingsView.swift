@@ -34,21 +34,12 @@ struct SettingsView: View {
             }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 59/255, green: 62/255, blue: 69/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
             VStack(spacing: 0) {
-                HStack {
-                    if controller.settingsSelection == "Library" {
-                        Button { if controller.selectedHistory != nil { controller.stopHistoryPlayback(); controller.selectedHistory = nil } else { controller.leaveLibrary() } } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain)
-                    }
-                    if let item = controller.selectedHistory, controller.settingsSelection == "Library" { Spacer(); Text(item.date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: "en_US")))).font(.system(size: 14, weight: .bold)); Spacer() }
-                    else { Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer() }
-                    if controller.settingsSelection == "Library" {
-                        if controller.selectedHistory != nil { Color.clear.frame(width: 28, height: 28) }
-                        else if controller.historySearchVisible {
-                            HStack(spacing: 6) { Image(systemName: "magnifyingglass"); TextField("Search history", text: $controller.historySearch).textFieldStyle(.plain); Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }.padding(.horizontal, 9).frame(width: 220, height: 28).background(Color.primary.opacity(0.09), in: Capsule())
-                        } else { Button { controller.historySearchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).help("Search recordings") }
-                    } else {
+                if controller.settingsSelection != "Library" {
+                    HStack {
+                        Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer()
                         Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).help("Select microphone")
-                    }
-                }.padding(.horizontal, 16).frame(height: 48)
+                    }.padding(.horizontal, 16).frame(height: 48)
+                }
                 switch controller.settingsSelection {
                 case "Sound": SoundPageView(controller: controller)
                 case "Models": ModelsPageView()
@@ -129,65 +120,6 @@ private struct SoundVolumeSlider: View {
             }.frame(maxHeight: .infinity).contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { point in value = min(1, max(0, (point.location.x - 10) / trackWidth)) })
         }.frame(width: 211, height: 28).accessibilityElement().accessibilityLabel("Volume").accessibilityValue("\(Int(value * 100)) percent").accessibilityAdjustableAction { direction in if direction == .increment { value = min(1, value + 0.05) } else if direction == .decrement { value = max(0, value - 0.05) } }
     }
-}
-private struct LibraryPageView: View {
-    @Environment(\.colorScheme) private var scheme
-    @ObservedObject var controller: AppController
-    var filtered: [HistoryEntry] { controller.history.filter { controller.historySearch.isEmpty || $0.text.localizedCaseInsensitiveContains(controller.historySearch) } }
-    private var groups: [(date: Date, entries: [HistoryEntry])] {
-        let grouped = Dictionary(grouping: filtered) { Calendar.current.startOfDay(for: $0.date) }
-        return grouped.keys.sorted(by: >).map { (date: $0, entries: grouped[$0]!.sorted { $0.date > $1.date }) }
-    }
-    private func dayLabel(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) { return "Today" }
-        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
-        return date.formatted(date: .abbreviated, time: .omitted)
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let item = controller.selectedHistory {
-                HStack(alignment: .top, spacing: 12) {
-                    ScrollView { VStack(alignment: .leading, spacing: 12) {
-                        Text(item.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16).background(scheme == .dark ? Color(red: 60/255, green: 63/255, blue: 67/255) : Color(white: 253/255), in: RoundedRectangle(cornerRadius: 16))
-                        HStack { Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.plain).disabled(controller.historyAudioURL(item) == nil); HStack(spacing: 1) { if let waveform = item.waveform, !waveform.isEmpty { ForEach(Array(waveform.enumerated()), id: \.offset) { _, amplitude in Capsule().fill(Color.primary.opacity(0.65)).frame(width: 1, height: max(2, CGFloat(amplitude) * 20)) } } else { Image(systemName: "waveform").foregroundStyle(.secondary) } }.frame(maxWidth: .infinity, minHeight: 24); Text(item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—").foregroundStyle(.secondary).font(.caption) }.padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-                        HStack {
-                            Button("Original") { controller.stopHistoryPlayback(); controller.historySegmented = false }.buttonStyle(.plain).padding(6).background(!controller.historySegmented ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                            Button("Segmented") { controller.stopHistoryPlayback(); controller.historySegmented = true }.buttonStyle(.plain).padding(6).background(controller.historySegmented ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5)).disabled(item.segments?.isEmpty ?? true).help("Play speech segments detected from the recording")
-                        }.font(.caption)
-                        if controller.historySegmented, let segments = item.segments {
-                            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in Button { controller.toggleHistoryPlayback(item, segment: segment) } label: { HStack { Image(systemName: "play.fill"); Text("Segment \(index + 1)"); Spacer(); Text(String(format: "%.1fs – %.1fs", segment.start, segment.end)).foregroundStyle(.secondary) }.font(.caption).padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8)) }.buttonStyle(.plain) }
-                        }
-                    } }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
-                    VStack(spacing: 12) {
-                        SettingsCard { HStack(spacing: 10) { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").lineLimit(1); Spacer() }.frame(minHeight: 48).help("Recording mode") }
-                        SettingsCard {
-                            HStack(spacing: 10) { Image(systemName: "mic.fill"); Text(item.inputName ?? "Not available").lineLimit(1).truncationMode(.tail); Spacer(minLength: 4); Text(item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—").font(.caption).foregroundStyle(.secondary) }.frame(minHeight: 48).help("Input device and recording duration"); Divider()
-                            HStack(spacing: 10) { Image(systemName: "waveform"); Text(item.modelName ?? "Not available").lineLimit(1).truncationMode(.tail); Spacer(minLength: 4); Text(item.processingDuration.map { String(format: "%.0fms", $0 * 1000) } ?? "—").font(.caption).foregroundStyle(.secondary) }.frame(minHeight: 48).help("Voice model and processing duration")
-                        }
-                        Spacer()
-                        HStack(spacing: 6) { Button("Report issue") { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/issues/new")!) }; Button("Open file location") { controller.revealHistory(item) } }.controlSize(.small)
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filtered.isEmpty {
-                Spacer(); HStack { Spacer(); Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").foregroundStyle(.secondary); Spacer() }; Spacer()
-            } else {
-                ScrollView { LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(groups, id: \.date) { group in
-                        Text(dayLabel(group.date)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).padding(.top, 8)
-                        ForEach(group.entries) { item in
-                            HStack(spacing: 8) {
-                                Button { controller.historySegmented = false; controller.selectedHistory = item } label: { Text(item.text).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.plain)
-                                if controller.hoveredHistoryID == item.id { Menu { Button("Copy") { copy(item) }; Button("Delete", role: .destructive) { controller.deleteHistory(item.id) } } label: { Image(systemName: "ellipsis").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize() }
-                            }.padding(16).background(scheme == .dark ? Color(red: 60/255, green: 63/255, blue: 67/255) : Color(white: 253/255), in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.08))).onHover { controller.hoveredHistoryID = $0 ? item.id : nil }
-                            .contextMenu { Button("Copy") { copy(item) }; Button("Delete", role: .destructive) { controller.deleteHistory(item.id) } }
-                        }
-                    }
-                } }
-            }
-        }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 20)
-    }
-    private func copy(_ item: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(item.text, forType: .string) }
 }
 private struct ConfigurationPageView: View {
     @Environment(\.colorScheme) private var scheme
