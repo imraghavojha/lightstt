@@ -152,11 +152,11 @@ struct LibraryPageView: View {
             }.padding(.horizontal, 12).frame(height: 44)
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
             VStack(spacing: 12) {
-                HStack { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").fontWeight(.bold); Spacer(); providerBadge }.padding(.horizontal, 14).frame(height: 49).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
+                HStack { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").fontWeight(.bold); Spacer(); providerBadge }.padding(.horizontal, 14).frame(height: 49).background(cardColor, in: RoundedRectangle(cornerRadius: 14)).overlay(drawerCardEdge)
                 VStack(spacing: 12) {
                     metadataRow("headphones", item.inputName ?? "Not available", item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—", .pink)
                     metadataRow("provider", item.modelName ?? "Not available", item.processingDuration.map { String(format: "%.0f ms", $0 * 1000) } ?? "—", .purple)
-                }.padding(14).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
+                }.padding(14).background(cardColor, in: RoundedRectangle(cornerRadius: 14)).overlay(drawerCardEdge)
                 Spacer()
                 HStack(spacing: 8) {
                     Button("Report issue") { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/issues/new")!) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
@@ -167,8 +167,12 @@ struct LibraryPageView: View {
     }
     private var drawerBackground: LinearGradient {
         LinearGradient(colors: scheme == .dark
-            ? [Color(red: 49/255, green: 53/255, blue: 62/255), Color(red: 35/255, green: 41/255, blue: 53/255)]
+            ? [Color(red: 55/255, green: 60/255, blue: 68/255), Color(red: 38/255, green: 45/255, blue: 54/255)]
             : [Color(red: 227/255, green: 230/255, blue: 236/255), Color(red: 230/255, green: 234/255, blue: 240/255)], startPoint: .top, endPoint: .bottom)
+    }
+    private var drawerCardEdge: some View {
+        RoundedRectangle(cornerRadius: 14).stroke(
+            LinearGradient(colors: scheme == .dark ? [Color(red: 82/255, green: 85/255, blue: 92/255), Color(red: 69/255, green: 72/255, blue: 79/255)] : [Color.white, Color(white: 0.87)], startPoint: .top, endPoint: .bottom), lineWidth: 0.5)
     }
     private func metadataRow(_ icon: String, _ title: String, _ value: String, _ color: Color) -> some View {
         HStack(spacing: 8) {
