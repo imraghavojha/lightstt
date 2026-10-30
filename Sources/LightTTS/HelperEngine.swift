@@ -43,6 +43,8 @@ final class HelperEngine: TranscriptionEngine, @unchecked Sendable {
         posix_spawn_file_actions_adddup2(&actions, output.fileHandleForWriting.fileDescriptor, 3)
         if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] != "1" {
             posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0)
+        } else {
+            posix_spawn_file_actions_addinherit_np(&actions, STDERR_FILENO)
         }
         posix_spawn_file_actions_adddup2(&actions, STDERR_FILENO, STDOUT_FILENO)
         for fd in [input.fileHandleForReading.fileDescriptor, input.fileHandleForWriting.fileDescriptor,
@@ -58,8 +60,13 @@ final class HelperEngine: TranscriptionEngine, @unchecked Sendable {
         var argv: [UnsafeMutablePointer<CChar>?] = [arg, nil]
         var envp = env
         LaunchTrace.mark("helper-spawn-start")
+        // Close every descriptor not set up above, so a helper never inherits another helper's pipes.
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT))
         var pid: pid_t = 0
-        let status = posix_spawn(&pid, executable.path, &actions, nil, &argv, &envp)
+        let status = posix_spawn(&pid, executable.path, &actions, &attributes, &argv, &envp)
         guard status == 0 else { throw POSIXError(POSIXErrorCode(rawValue: status) ?? .EIO) }
         processState.pid = pid
         processState.running = true
