@@ -170,7 +170,6 @@ private struct ConfigurationPageView: View {
     @AppStorage("pushShortcutEnabled") private var pushShortcutEnabled = false
     @AppStorage("pushHotkeyCode") private var pushHotkeyCode = 49
     @AppStorage("pushHotkeyModifiers") private var pushHotkeyModifiers = Int(NSEvent.ModifierFlags.option.union(.shift).rawValue)
-    @AppStorage("pushToTalk") private var pushToTalk = false
     @AppStorage("rightOption") private var rightOption = false
     @AppStorage("restoreClipboard") private var restoreClipboard = true
     @AppStorage("autoPaste") private var pasteResult = true
@@ -199,8 +198,8 @@ private struct ConfigurationPageView: View {
             }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }.onChange(of: alwaysShow) { _ in controller.refreshRecordingWindow() }
             Text("Keyboard Shortcuts").font(.system(size: 13, weight: .medium)).padding(.top, 18).padding(.bottom, 9)
             SettingsCard {
-                shortcutRow("Push to Talk", subtitle: "Hold to record, release when done", key: "pushHotkeyCode", modifiers: "pushHotkeyModifiers", fallback: 49, enabled: "pushShortcutEnabled"); PageRule()
-                shortcutRow("Toggle Recording", subtitle: "Starts and stops recordings", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); PageRule()
+                shortcutRow("Push to Talk", subtitle: "Separate shortcut: hold to record, release when done", key: "pushHotkeyCode", modifiers: "pushHotkeyModifiers", fallback: 49, enabled: "pushShortcutEnabled"); PageRule()
+                shortcutRow("Toggle Recording", subtitle: "Press once to start, again to stop", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); PageRule()
                 HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255)) }; Spacer(); Button { SettingsDefaults.store.set(-1, forKey: "mouseShortcut"); NotificationCenter.default.post(name: .shortcutsChanged, object: nil); controller.objectWillChange.send() } label: { Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); MouseShortcutRecorder().frame(width: 150, height: 28) }.frame(minHeight: 50); PageRule()
                 shortcutRow("Cancel Recording", subtitle: "Discards the active recording", key: "cancelHotkeyCode", modifiers: "cancelHotkeyModifiers", fallback: 53)
             }

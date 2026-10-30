@@ -53,8 +53,6 @@ import Darwin
     private var sessionAutoPaste = true
     private var testAudio: [Float]?
     private var defaultsObserver: NSObjectProtocol?
-    private var pressed = false
-    private var shortcutOwnsRecording = false
     private var pushHeld = false
     private var pushOwnsRecording = false
     private var mouseStart: Date?
@@ -238,18 +236,7 @@ import Darwin
         installHotkey()
     }
     func handleShortcut(_ down: Bool) {
-        if down && !pressed {
-            pressed = true
-            if state == "error" { cancel() }
-            if UserDefaults.standard.bool(forKey: "pushToTalk") { if state == "idle" { shortcutOwnsRecording = true; start() } }
-            else { toggleRecording() }
-        } else if !down && pressed {
-            pressed = false
-            if shortcutOwnsRecording {
-                shortcutOwnsRecording = false
-                if state == "starting" { cancel() } else if state == "recording" { stop() }
-            }
-        }
+        if down { toggleRecording() }
     }
     func toggleRecording() {
         if state == "error" { cancel() }
