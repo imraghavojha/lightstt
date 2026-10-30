@@ -11,11 +11,11 @@ final class ModelResidencyPolicyTests: XCTestCase {
         XCTAssertNil(ac.idleUnloadDelay(for: .idle))
         XCTAssertEqual(battery.idleUnloadDelay(for: .idle), 10)
         XCTAssertEqual(noKeep.idleUnloadDelay(for: .idle), 0)
-        for phase: RecordingPhase in [.starting, .recording, .processing(.transcribing)] {
+        for phase: RecordingPhase in [.starting, .recording, .processing(.transcribing), .done] {
             XCTAssertNil(noKeep.idleUnloadDelay(for: phase))
         }
         XCTAssertEqual(
             ModelResidencyPolicy(keepLoaded: true, onACPower: false, unloadAfter: 0)
-                .idleUnloadDelay(for: .done), 1)
+                .idleUnloadDelay(for: .idle), 1)
     }
 }

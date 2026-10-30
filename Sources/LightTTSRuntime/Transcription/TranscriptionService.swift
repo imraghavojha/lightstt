@@ -9,11 +9,13 @@ public final class TranscriptionService: TranscriptionServicing {
     private var client: (any EngineClient)?
     private var loaded: EngineConfiguration?
     private var warming: EngineConfiguration?
-    private var warmTask: Task<any EngineClient, Error>?
+    private var warmTask: Task<Void, Error>?
+    private var warmWaiters: Set<UUID> = []
     private var generation = UUID()
     private var timer: (any ScheduledCancellation)?
     private var liveUses = 0
     private var historyClients: [UUID: any EngineClient] = [:]
+    private var historyLoads: [UUID: Task<Void, Error>] = [:]
     private var historyGeneration = UUID()
     private var observers: [UUID: AsyncStream<TranscriptionSnapshot>.Continuation] = [:]
 
@@ -44,9 +46,10 @@ public final class TranscriptionService: TranscriptionServicing {
         }
     }
 
+    /// Starts a speculative load. Reusing a load does not extend its idle timeout.
+    /// Callers initiate warming on AC connection and handle load or crash errors in their UI.
     public func warm(_ configuration: EngineConfiguration) {
         if loaded == configuration || warming == configuration {
-            resetTimer()
             return
         }
         clearLive()
@@ -69,7 +72,7 @@ public final class TranscriptionService: TranscriptionServicing {
                 self.warmTask = nil
                 self.publish()
                 self.resetTimer()
-                return engine
+                return
             } catch {
                 if let self, self.generation == token {
                     self.warming = nil
@@ -89,11 +92,29 @@ public final class TranscriptionService: TranscriptionServicing {
         if loaded == configuration { return }
         guard let task = warmTask else { throw CancellationError() }
         let token = generation
-        _ = try await task.value
-        try Task.checkCancellation()
-        guard generation == token, loaded == configuration else { throw CancellationError() }
+        let waiter = UUID()
+        warmWaiters.insert(waiter)
+        defer { warmWaiters.remove(waiter) }
+        try await withTaskCancellationHandler {
+            try await task.value
+            if Task.isCancelled {
+                cancelWarmWaiter(waiter, token: token)
+                throw CancellationError()
+            }
+            guard generation == token, loaded == configuration else { throw CancellationError() }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelWarmWaiter(waiter, token: token)
+            }
+        }
     }
 
+    private func cancelWarmWaiter(_ waiter: UUID, token: UUID) {
+        guard generation == token, warmWaiters.remove(waiter) != nil else { return }
+        if warmWaiters.isEmpty { clearLive() }
+    }
+
+    /// Callers serialize or defer history work when their recording workflow requires it.
     public func transcribe(
         _ audio: PCM16k, using configuration: EngineConfiguration, purpose: TranscriptionPurpose
     ) async throws -> String {
@@ -111,12 +132,10 @@ public final class TranscriptionService: TranscriptionServicing {
             warm(configuration)
             let token = generation
             do {
+                try await prepare(configuration)
+                guard let engine = client, generation == token else { throw CancellationError() }
                 let result = try await withTaskCancellationHandler {
-                    try await prepare(configuration)
-                    guard let engine = client, generation == token else {
-                        throw CancellationError()
-                    }
-                    return try await engine.transcribe(audio)
+                    try await engine.transcribe(audio)
                 } onCancel: {
                     Task { @MainActor [weak self] in
                         if self?.generation == token { self?.clearLive() }
@@ -124,9 +143,10 @@ public final class TranscriptionService: TranscriptionServicing {
                 }
                 try Task.checkCancellation()
                 guard generation == token else { throw CancellationError() }
+                if !policy.onACPower && !policy.keepLoaded { clearLive() }
                 return result
             } catch {
-                if generation == token { clearLive() }
+                if !(error is CancellationError), generation == token { clearLive() }
                 throw error
             }
         }
@@ -137,26 +157,41 @@ public final class TranscriptionService: TranscriptionServicing {
     ) async throws -> String {
         let id = UUID()
         let token = historyGeneration
-        let engine = try await factory.load(configuration, onCrash: {})
-        guard !Task.isCancelled, token == historyGeneration else {
-            engine.terminate()
-            throw CancellationError()
+        let factory = self.factory
+        let load = Task { [weak self] in
+            let engine = try await factory.load(configuration, onCrash: {})
+            guard let self, !Task.isCancelled, token == self.historyGeneration else {
+                engine.terminate()
+                throw CancellationError()
+            }
+            self.historyClients[id] = engine
         }
-        historyClients[id] = engine
+        historyLoads[id] = load
         defer {
-            historyClients.removeValue(forKey: id)
-            engine.terminate()
+            historyLoads.removeValue(forKey: id)
+            historyClients.removeValue(forKey: id)?.terminate()
         }
-        let result = try await withTaskCancellationHandler {
-            try await engine.transcribe(audio)
+        return try await withTaskCancellationHandler {
+            try await load.value
+            try Task.checkCancellation()
+            guard token == historyGeneration, let engine = historyClients[id] else {
+                throw CancellationError()
+            }
+            let result = try await engine.transcribe(audio)
+            try Task.checkCancellation()
+            guard token == historyGeneration else { throw CancellationError() }
+            return result
         } onCancel: {
-            Task { @MainActor in engine.terminate() }
+            Task { @MainActor [weak self] in
+                load.cancel()
+                self?.historyClients.removeValue(forKey: id)?.terminate()
+            }
         }
-        try Task.checkCancellation()
-        guard token == historyGeneration else { throw CancellationError() }
-        return result
     }
 
+    /// Callers must report power, preference, and recording phase changes as they occur.
+    /// Callers provide preference defaults and refresh them when they change. A completed
+    /// recording remains non-idle until the caller reports idle or error.
     public func updateResidency(policy: ModelResidencyPolicy, phase: RecordingPhase) {
         self.policy = policy
         self.phase = phase
@@ -173,6 +208,8 @@ public final class TranscriptionService: TranscriptionServicing {
     public func shutdown() {
         clearLive()
         historyGeneration = UUID()
+        for load in historyLoads.values { load.cancel() }
+        historyLoads.removeAll()
         for engine in historyClients.values { engine.terminate() }
         historyClients.removeAll()
     }
@@ -188,6 +225,7 @@ public final class TranscriptionService: TranscriptionServicing {
         timer = nil
         warmTask?.cancel()
         warmTask = nil
+        warmWaiters.removeAll()
         client?.terminate()
         client = nil
         loaded = nil

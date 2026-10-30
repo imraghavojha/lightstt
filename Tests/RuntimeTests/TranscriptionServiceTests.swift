@@ -49,17 +49,33 @@ private final class TestFactory: EngineClientFactory {
     }
     var requests: [Request] = []
     var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    var cancellations = 0
+    var cancellationWaiter: CheckedContinuation<Void, Never>?
 
     func load(
         _ configuration: EngineConfiguration, onCrash: @escaping @MainActor @Sendable () -> Void
     ) async throws -> any EngineClient {
-        try await withCheckedThrowingContinuation { continuation in
-            requests.append(
-                Request(configuration: configuration, crash: onCrash, continuation: continuation))
-            let ready = waiters.filter { $0.0 <= requests.count }
-            waiters.removeAll { $0.0 <= requests.count }
-            for (_, waiter) in ready { waiter.resume() }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                requests.append(
+                    Request(
+                        configuration: configuration, crash: onCrash, continuation: continuation))
+                let ready = waiters.filter { $0.0 <= requests.count }
+                waiters.removeAll { $0.0 <= requests.count }
+                for (_, waiter) in ready { waiter.resume() }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.cancellations += 1
+                self.cancellationWaiter?.resume()
+                self.cancellationWaiter = nil
+            }
         }
+    }
+
+    func waitForCancellation() async {
+        if cancellations > 0 { return }
+        await withCheckedContinuation { cancellationWaiter = $0 }
     }
 
     func waitForRequests(_ count: Int) async {
@@ -165,6 +181,110 @@ final class TranscriptionServiceTests: XCTestCase {
             XCTFail("Expected cancellation")
         } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
         await engine.waitUntilTerminated()
+        XCTAssertNil(service.snapshot.loaded)
+        XCTAssertEqual(engine.terminations, 1)
+    }
+
+    func testSolePrepareCancellationCancelsLoadAndDiscardsLateHelper() async {
+        let factory = TestFactory()
+        let service = TranscriptionService(factory: factory, scheduler: ManualScheduler())
+        let preparation = Task { try await service.prepare(a) }
+        await factory.waitForRequests(1)
+        preparation.cancel()
+        await factory.waitForCancellation()
+        let engine = TestEngine()
+        factory.requests[0].continuation.resume(returning: engine)
+        do {
+            try await preparation.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertNil(service.snapshot.loaded)
+        XCTAssertEqual(engine.terminations, 1)
+    }
+
+    func testCancellingOnePrepareKeepsSharedLoadAlive() async throws {
+        let factory = TestFactory()
+        let service = TranscriptionService(factory: factory, scheduler: ManualScheduler())
+        let first = Task { try await service.prepare(a) }
+        await factory.waitForRequests(1)
+        var second: Task<Void, Error>!
+        await withCheckedContinuation { (started: CheckedContinuation<Void, Never>) in
+            second = Task { @MainActor in
+                started.resume()
+                try await service.prepare(a)
+            }
+        }
+        first.cancel()
+        let engine = TestEngine()
+        factory.requests[0].continuation.resume(returning: engine)
+        do {
+            try await first.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        try await second.value
+        XCTAssertEqual(service.snapshot.loaded, a)
+        XCTAssertEqual(engine.terminations, 0)
+        service.shutdown()
+    }
+
+    func testShutdownCancelsHistoryLoadAndDiscardsLateHelper() async {
+        let factory = TestFactory()
+        let service = TranscriptionService(factory: factory, scheduler: ManualScheduler())
+        let history = Task {
+            try await service.transcribe(audio, using: a, purpose: .history(entryID: UUID()))
+        }
+        await factory.waitForRequests(1)
+        service.shutdown()
+        await factory.waitForCancellation()
+        let engine = TestEngine()
+        factory.requests[0].continuation.resume(returning: engine)
+        do {
+            _ = try await history.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(engine.terminations, 1)
+    }
+
+    func testReuseDoesNotResetIdleTimeoutAndDoneIsNotIdle() async throws {
+        let factory = TestFactory()
+        let scheduler = ManualScheduler()
+        let service = TranscriptionService(factory: factory, scheduler: scheduler)
+        let battery = ModelResidencyPolicy(keepLoaded: true, onACPower: false, unloadAfter: 10)
+        service.updateResidency(policy: battery, phase: .idle)
+        let preparation = Task { try await service.prepare(a) }
+        await factory.waitForRequests(1)
+        let engine = TestEngine()
+        factory.requests[0].continuation.resume(returning: engine)
+        try await preparation.value
+        scheduler.advance(by: 9)
+        service.warm(a)
+        scheduler.advance(by: 1)
+        XCTAssertNil(service.snapshot.loaded)
+        XCTAssertEqual(engine.terminations, 1)
+
+        service.updateResidency(policy: battery, phase: .done)
+        let next = Task { try await service.prepare(a) }
+        await factory.waitForRequests(2)
+        let second = TestEngine()
+        factory.requests[1].continuation.resume(returning: second)
+        try await next.value
+        scheduler.advance(by: 100)
+        XCTAssertEqual(service.snapshot.loaded, a)
+        service.shutdown()
+    }
+
+    func testBatteryWithoutKeepLoadedUnloadsAfterInferenceDuringProcessing() async throws {
+        let factory = TestFactory()
+        let service = TranscriptionService(factory: factory, scheduler: ManualScheduler())
+        service.updateResidency(
+            policy: ModelResidencyPolicy(keepLoaded: false, onACPower: false, unloadAfter: 10),
+            phase: .processing(.transcribing))
+        let inference = Task { try await service.transcribe(audio, using: a, purpose: .live) }
+        await factory.waitForRequests(1)
+        let engine = TestEngine()
+        factory.requests[0].continuation.resume(returning: engine)
+        let result = try await inference.value
+        XCTAssertEqual(result, "text")
         XCTAssertNil(service.snapshot.loaded)
         XCTAssertEqual(engine.terminations, 1)
     }
