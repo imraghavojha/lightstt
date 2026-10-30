@@ -227,8 +227,7 @@ import Darwin
         hotkey.onMouse = { [weak self] down in self?.handleMouse(down) }
         hotkey.onEscape = { [weak self] in if self?.state != "idle" { self?.cancel() } }
         let installed = hotkey.install()
-        if !AXIsProcessTrusted() { message = "Enable Accessibility in System Settings → Privacy & Security → Accessibility, then retry the shortcut." }
-        else if hotkey.registrationFailed { message = "A shortcut is unavailable. Choose another in Configuration → Keyboard Shortcuts." }
+        if hotkey.registrationFailed { message = "A shortcut is unavailable. Choose another in Configuration → Keyboard Shortcuts." }
         else if message.contains("shortcut") || message.contains("Accessibility") { message = "" }
         return installed
     }
@@ -273,7 +272,6 @@ import Darwin
     }
     func start() {
         guard state == "idle", historyMigration == nil else { return }
-        if !isTestAudio && !AXIsProcessTrusted() { fail("Enable Accessibility in System Settings → Privacy & Security → Accessibility, then try again."); return }
         unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         state = "starting"
@@ -289,10 +287,9 @@ import Darwin
         }
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         Task {
-            if sessionAutoPaste {
+            if sessionAutoPaste && AXIsProcessTrusted() {
                 let target = await Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }.value
                 guard current == generation, state == "starting" else { return }
-                guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
                 focus = target
             }
             if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
@@ -364,17 +361,22 @@ import Darwin
                     try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
                     return
                 }
+                var pasteWarning: String?
                 if sessionAutoPaste {
-                    guard AXIsProcessTrusted() else { if !isTestAudio { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }; throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
-                    guard let target = focus else { throw SpeechError.audio("The focused field is unavailable.") }
-                    let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
-                    let send = UserDefaults.standard.bool(forKey: "sendOnShift")
-                    let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
-                    try await Task.detached(priority: .userInitiated) {
-                        try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
-                    }.value
-                    if shouldCopyTranscript(autoPaste: true, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
-                } else {
+                    if !AXIsProcessTrusted() {
+                        pasteWarning = "Grant Accessibility to auto-paste. The transcription was copied to the clipboard."
+                    } else if let target = focus {
+                        let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
+                        let send = UserDefaults.standard.bool(forKey: "sendOnShift")
+                        let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
+                        do {
+                            try await Task.detached(priority: .userInitiated) {
+                                try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
+                            }.value
+                        } catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
+                    } else { pasteWarning = "The focused field is unavailable. The transcription was copied to the clipboard." }
+                }
+                if pasteWarning != nil || shouldCopyTranscript(autoPaste: sessionAutoPaste, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) {
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
@@ -391,7 +393,7 @@ import Darwin
                     if written { item.audioFile = filename }
                     if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
                 }
-                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
+                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }

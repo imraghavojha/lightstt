@@ -118,7 +118,6 @@ private struct SoundPageView: View {
     @AppStorage("increaseMicVolume") private var increaseMic = false
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 0) {
-            PermissionsCard(controller: controller)
             SettingsCard {
                 SettingsRow(title: "Sound effects", height: 54) { HStack(spacing: 0) { ForEach(["Simple", "Classic", "Off"], id: \.self) { value in Button { sound = value } label: { Text(value).font(.system(size: 12, weight: sound == value ? .semibold : .regular)).frame(width: value == "Classic" ? 62 : value == "Simple" ? 62 : 40, height: 24).foregroundStyle(sound == value ? (scheme == .dark ? Color.white : Color.black) : Color.secondary).background(sound == value ? (scheme == .dark ? Color(red: 91/255, green: 93/255, blue: 99/255) : Color.white) : Color.clear, in: RoundedRectangle(cornerRadius: 7)).overlay(RoundedRectangle(cornerRadius: 7).stroke(sound == value ? Color.primary.opacity(0.12) : .clear, lineWidth: 0.5)).shadow(color: sound == value ? .black.opacity(0.12) : .clear, radius: 1, y: 0.5) }.buttonStyle(.plain) } }.padding(2).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))) }
                 PageRule()
@@ -189,6 +188,7 @@ private struct ConfigurationPageView: View {
     }
     private var configurationPage: some View {
         ScrollView { VStack(alignment: .leading, spacing: 0) {
+            PermissionsCard(controller: controller)
             SettingsCard {
                 HStack(alignment: .top) { Text("Theme").padding(.top, 2); Spacer(); choices(["Auto", "Light", "Dark"], selection: $theme, icons: ["circle.lefthalf.filled", "sun.max.fill", "moon.fill"]) }.padding(.top, 12).padding(.bottom, 4)
                 PageRule()
@@ -295,7 +295,7 @@ private struct ConfigurationPageView: View {
         } }
     }
     private func shortcutRow(_ title: String, subtitle: String, key: String, modifiers: String?, fallback: Int, enabled: String? = nil) -> some View {
-        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { SettingsDefaults.store.removeObject(forKey: key); if let modifiers { SettingsDefaults.store.removeObject(forKey: modifiers) }; if key == "hotkeyCode" { SettingsDefaults.store.set(false, forKey: "rightOption") } }; NotificationCenter.default.post(name: .shortcutsChanged, object: nil); controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).frame(width: 150, height: 28) }.padding(.trailing, 6).frame(minHeight: 50)
+        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { ShortcutButton.reset(codeKey: key, modifiersKey: modifiers) }; NotificationCenter.default.post(name: .shortcutsChanged, object: nil); controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).frame(width: 150, height: 28) }.padding(.trailing, 6).frame(minHeight: 50)
     }
 }
 

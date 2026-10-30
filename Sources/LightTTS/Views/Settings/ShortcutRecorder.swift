@@ -38,19 +38,36 @@ final class ShortcutButton: NSButton {
         else if modifierCandidate == nil { modifierCandidate = code }
     }
     private func save(_ candidate: Shortcut) {
-        let others: [(String, Shortcut, Bool)] = [("hotkeyCode", .toggle, true), ("pushHotkeyCode", .push, SettingsDefaults.store.bool(forKey: "pushShortcutEnabled")), ("cancelHotkeyCode", .cancel, true)]
-        if others.contains(where: { $0.0 != codeKey && $0.2 && Shortcut.same($0.1, candidate) }) { title = "Already used by LightTTS"; return }
-        if !candidate.modifierOnly {
-            var ref: EventHotKeyRef?
-            let status = RegisterEventHotKey(UInt32(candidate.code), candidate.carbonFlags, EventHotKeyID(signature: 0x4c545453, id: 99), GetApplicationEventTarget(), 0, &ref)
-            if let ref { UnregisterEventHotKey(ref) }
-            if status != noErr { title = status == eventHotKeyExistsErr ? "Shortcut already in use" : "Shortcut unavailable"; return }
-        }
+        if let warning = Self.validate(candidate, codeKey: codeKey) { title = warning; return }
         SettingsDefaults.store.set(candidate.code, forKey: codeKey)
         if let modifiersKey { SettingsDefaults.store.set(Int(candidate.flags.rawValue), forKey: modifiersKey) }
         if codeKey == "hotkeyCode" { SettingsDefaults.store.set(false, forKey: "rightOption") }
         if let enabledKey { SettingsDefaults.store.set(true, forKey: enabledKey) }
         NotificationCenter.default.post(name: .shortcutsChanged, object: nil); finish()
+    }
+    private static func validate(_ candidate: Shortcut, codeKey: String) -> String? {
+        let others: [(String, Shortcut, Bool)] = [("hotkeyCode", .toggle, true), ("pushHotkeyCode", .push, SettingsDefaults.store.bool(forKey: "pushShortcutEnabled")), ("cancelHotkeyCode", .cancel, true)]
+        if others.contains(where: { $0.0 != codeKey && $0.2 && Shortcut.same($0.1, candidate) }) { return "Already used by LightTTS" }
+        if !candidate.modifierOnly {
+            var ref: EventHotKeyRef?
+            let status = RegisterEventHotKey(UInt32(candidate.code), candidate.carbonFlags, EventHotKeyID(signature: 0x4c545453, id: 99), GetApplicationEventTarget(), 0, &ref)
+            if let ref { UnregisterEventHotKey(ref) }
+            if status != noErr { return status == eventHotKeyExistsErr ? "Shortcut already in use" : "Shortcut unavailable" }
+        }
+        return nil
+    }
+    static func reset(codeKey: String, modifiersKey: String?) {
+        let candidate = codeKey == "hotkeyCode" ? Shortcut(code: 49, flags: .option) : Shortcut(code: 53, flags: [])
+        // Temporarily release our registrations, just as when recording a shortcut.
+        isRecording = true; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil)
+        let warning = validate(candidate, codeKey: codeKey)
+        if warning == nil {
+            SettingsDefaults.store.removeObject(forKey: codeKey)
+            if let modifiersKey { SettingsDefaults.store.removeObject(forKey: modifiersKey) }
+            if codeKey == "hotkeyCode" { SettingsDefaults.store.set(false, forKey: "rightOption") }
+        }
+        isRecording = false; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil)
+        if let warning { let alert = NSAlert(); alert.messageText = warning; alert.informativeText = "Choose another shortcut before resetting."; alert.runModal() }
     }
     private func finish() { recording = false; Self.isRecording = false; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil); refresh(); window?.makeFirstResponder(nil) }
     override func resignFirstResponder() -> Bool { let wasRecording = recording; recording = false; Self.isRecording = false; if wasRecording { NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil) }; refresh(); return super.resignFirstResponder() }

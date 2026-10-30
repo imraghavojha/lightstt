@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon
+import LightTTSCore
 
 extension Notification.Name { static let shortcutsChanged = Notification.Name("LightTTSShortcutsChanged"); static let shortcutCaptureChanged = Notification.Name("LightTTSShortcutCaptureChanged") }
 
@@ -16,7 +17,7 @@ struct Shortcut {
     static var toggle: Shortcut { load("hotkeyCode", "hotkeyModifiers", 49, .option) }
     static var push: Shortcut { load("pushHotkeyCode", "pushHotkeyModifiers", 49, [.option, .shift]) }
     static var cancel: Shortcut { load("cancelHotkeyCode", "cancelHotkeyModifiers", 53, []) }
-    static func same(_ a: Shortcut, _ b: Shortcut) -> Bool { a.code == b.code && (a.modifierOnly || a.carbonFlags == b.carbonFlags) }
+    static func same(_ a: Shortcut, _ b: Shortcut) -> Bool { ShortcutConflict.matches(code: a.code, modifiers: a.carbonFlags, modifierOnly: a.modifierOnly, otherCode: b.code, otherModifiers: b.carbonFlags) }
 }
 
 @MainActor final class HotkeyMonitor {
@@ -50,7 +51,7 @@ struct Shortcut {
                 Task { @MainActor in self?.handle(event) }
             }
         }
-        return AXIsProcessTrusted() && !registrationFailed
+        return !registrationFailed
     }
     private func register(_ shortcut: Shortcut, id: UInt32) {
         guard !shortcut.modifierOnly else { return }
