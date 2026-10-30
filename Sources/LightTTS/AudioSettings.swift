@@ -112,40 +112,46 @@ private struct SystemOutputVolume: OutputVolumeControlling {
     func setVolume(_ value: Float, channel: UInt32) { AudioSettings.setOutputVolume(device, element: channel, value: value) }
 }
 // MediaRemote provides the system media-key target without Apple Events.
-private final class MediaGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var generation = 0
-    private var active = false
-    private var operation = 0
-    func setOperation(_ token: Int) { lock.lock(); operation = token; lock.unlock() }
-    func start() -> Int { lock.lock(); defer { lock.unlock() }; generation += 1; active = true; return generation }
-    func stop() { lock.lock(); generation += 1; active = false; lock.unlock() }
-    func isCurrent(_ token: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == token }
-    func ifActive(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == operation && action() }
-}
-private struct SystemMediaController: MediaControlling {
+private final class SystemMediaController: MediaControlling {
     let gate: MediaGate
+    private let intent = MediaIntentTracker()
+    private var observers: [NSObjectProtocol] = []
     private static let framework = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
     private typealias IsPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (Bool) -> Void) -> Void
     private typealias GetClient = @convention(c) (DispatchQueue, @escaping @convention(block) (UnsafeRawPointer?) -> Void) -> Void
     private typealias GetBundle = @convention(c) (UnsafeRawPointer) -> Unmanaged<CFString>?
-    private typealias GetPID = @convention(c) (UnsafeRawPointer) -> Int32
     private typealias SendCommand = @convention(c) (UInt32, CFDictionary?) -> Bool
+    private typealias RegisterNotifications = @convention(c) (DispatchQueue) -> Void
+    init(gate: MediaGate) {
+        self.gate = gate
+        guard let handle = Self.framework, let symbol = dlsym(handle, "MRMediaRemoteRegisterForNowPlayingNotifications") else { return }
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: Notification.Name("kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification"), object: nil, queue: nil) { [intent] notification in
+            if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE media playback notification %@", String(describing: notification.userInfo)) }
+            intent.playbackChanged(notification.userInfo?["kMRMediaRemoteNowPlayingApplicationIsPlayingUserInfoKey"] as? Bool)
+        })
+        observers.append(center.addObserver(forName: Notification.Name("kMRMediaRemoteNowPlayingApplicationDidChangeNotification"), object: nil, queue: nil) { [intent] _ in
+            if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE media player notification") }
+            intent.playerChanged()
+        })
+        unsafeBitCast(symbol, to: RegisterNotifications.self)(DispatchQueue.global())
+    }
+    deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) } }
+    private func trace(_ message: String) {
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE media %@", message) }
+    }
 
     private func target() -> String? {
         guard let handle = Self.framework,
               let querySymbol = dlsym(handle, "MRMediaRemoteGetNowPlayingClient"),
-              let bundleSymbol = dlsym(handle, "MRNowPlayingClientGetBundleIdentifier"),
-              let pidSymbol = dlsym(handle, "MRNowPlayingClientGetProcessIdentifier") else { return nil }
+              let bundleSymbol = dlsym(handle, "MRNowPlayingClientGetBundleIdentifier") else { return nil }
         let query = unsafeBitCast(querySymbol, to: GetClient.self)
         let bundle = unsafeBitCast(bundleSymbol, to: GetBundle.self)
-        let pid = unsafeBitCast(pidSymbol, to: GetPID.self)
         let semaphore = DispatchSemaphore(value: 0), lock = NSLock()
         var identity: String?
         query(DispatchQueue.global()) { client in
             if let client, let identifier = bundle(client)?.takeUnretainedValue() as String?, !identifier.isEmpty {
-                let process = pid(client)
-                if process > 0 { lock.lock(); identity = "\(identifier):\(process)"; lock.unlock() }
+                lock.lock(); identity = identifier; lock.unlock()
             }
             semaphore.signal()
         }
@@ -165,12 +171,29 @@ private struct SystemMediaController: MediaControlling {
         guard let handle = Self.framework, let symbol = dlsym(handle, "MRMediaRemoteSendCommand") else { return false }
         return unsafeBitCast(symbol, to: SendCommand.self)(command, nil)
     }
+    private func processIdentity(_ bundle: String) -> [String]? {
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        guard apps.count == 1, let app = apps.first, let launch = app.launchDate else { return nil }
+        return [bundle, String(app.processIdentifier), String(launch.timeIntervalSince1970)]
+    }
     func pausePlaying() throws -> [String] {
-        guard let identity = target(), isPlaying() == true, target() == identity, gate.ifActive({ send(1) }) else { return [] }
-        return [identity]
+        let bundle = target(), playing = isPlaying()
+        let identity = bundle.flatMap { processIdentity($0) }
+        trace("pause target=\(bundle ?? "nil") identity=\(identity?.joined(separator: "/") ?? "nil") playing=\(String(describing: playing))")
+        guard let bundle, let identity, playing == true,
+              target() == bundle, processIdentity(bundle) == identity else { trace("pause skipped"); return [] }
+        intent.begin()
+        guard gate.ifActive({ send(1) }) else { intent.cancel(); trace("pause skipped"); return [] }
+        trace("pause sent")
+        return identity
     }
     func resume(_ players: [String]) {
-        guard let identity = players.first, target() == identity, isPlaying() == false, target() == identity else { return }
-        _ = send(0)
+        guard players.count == 3, let identity = players.first else { intent.cancel(); return }
+        // MediaRemote may report the old playing state briefly after a pause.
+        Thread.sleep(forTimeInterval: 0.2)
+        let stopped = gate.ifStopped { true }, bundle = target(), process = processIdentity(identity), playing = isPlaying()
+        trace("resume stopped=\(stopped) target=\(bundle ?? "nil") identity=\(process?.joined(separator: "/") ?? "nil") playing=\(String(describing: playing))")
+        guard stopped, bundle == identity, process == players, playing == false, target() == identity, processIdentity(identity) == players else { intent.cancel(); trace("resume skipped"); return }
+        trace("resume sent=\(intent.finish { gate.ifStopped { send(0) } })")
     }
 }

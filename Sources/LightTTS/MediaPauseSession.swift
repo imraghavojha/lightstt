@@ -1,5 +1,27 @@
 import Foundation
 
+/// A resume is safe only after observing our pause and no subsequent player change.
+final class MediaIntentTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var awaitingPause = false
+    private var valid = false
+    func begin() { lock.lock(); awaitingPause = true; valid = true; lock.unlock() }
+    func playbackChanged(_ playing: Bool?) {
+        lock.lock(); defer { lock.unlock() }
+        guard valid else { return }
+        if awaitingPause && playing == false { awaitingPause = false }
+        else { valid = false }
+    }
+    func playerChanged() { lock.lock(); valid = false; lock.unlock() }
+    func finish(_ action: () -> Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let allowed = valid && !awaitingPause
+        valid = false; awaitingPause = false
+        return allowed && action()
+    }
+    func cancel() { lock.lock(); valid = false; awaitingPause = false; lock.unlock() }
+}
+
 protocol MediaControlling {
     func pausePlaying() throws -> [String]
     func resume(_ players: [String])
@@ -29,12 +51,27 @@ final class OutputVolumeSession {
     init(controller: any OutputVolumeControlling) { self.controller = controller }
     func begin(factor: Float) {
         guard previous.isEmpty else { return }
-        previous = controller.volumes().map { (channel: $0.0, original: $0.1, applied: $0.1 * factor) }
-        for entry in previous { controller.setVolume(entry.applied, channel: entry.channel) }
+        let originals = controller.volumes()
+        for (channel, value) in originals { controller.setVolume(value * factor, channel: channel) }
+        let readback = Dictionary(uniqueKeysWithValues: controller.volumes())
+        previous = originals.compactMap { channel, original in readback[channel].map { (channel, original, $0) } }
     }
     func end() {
         let current = Dictionary(uniqueKeysWithValues: controller.volumes())
-        for entry in previous where current[entry.channel] == entry.applied { controller.setVolume(entry.original, channel: entry.channel) }
+        for entry in previous where current[entry.channel].map({ abs($0 - entry.applied) < 0.001 }) == true { controller.setVolume(entry.original, channel: entry.channel) }
         previous = []
     }
+}
+
+final class MediaGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+    private var active = false
+    private var operation = 0
+    func setOperation(_ token: Int) { lock.lock(); operation = token; lock.unlock() }
+    func start() -> Int { lock.lock(); defer { lock.unlock() }; generation += 1; active = true; return generation }
+    func stop() { lock.lock(); if active { generation += 1; active = false }; lock.unlock() }
+    func isCurrent(_ token: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == token }
+    func ifActive(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == operation && action() }
+    func ifStopped(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return !active && generation == operation + 1 && action() }
 }

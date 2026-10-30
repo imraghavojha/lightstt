@@ -29,7 +29,8 @@ struct Shortcut {
     private var workspaceObservers: [NSObjectProtocol] = []
     private var unlockObserver: NSObjectProtocol?
     private var toggleState = ToggleShortcutState()
-    private var recording = false
+    private var cancelState = CancelRegistrationState()
+    private var recording: Bool { cancelState.recording }
     private(set) var registrationFailed = false
     var onShortcut: ((Bool) -> Void)?; var onEscape: (() -> Void)?; var onPush: ((Bool) -> Void)?; var onMouse: ((Bool) -> Void)?
     func install() -> Bool {
@@ -43,9 +44,9 @@ struct Shortcut {
             MainActor.assumeIsolated { Unmanaged<HotkeyMonitor>.fromOpaque(context).takeUnretainedValue().dispatch(id.id, down) }
             return noErr
         }, types.count, &types, Unmanaged.passUnretained(self).toOpaque(), &handler)
+        cancelState.setInstalled(true)
         register(Shortcut.toggle, id: 1)
         if pushAvailable { register(Shortcut.push, id: 2) }
-        if recording { register(Shortcut.cancel, id: 3) }
         if AXIsProcessTrusted() {
             local = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .otherMouseDown, .otherMouseUp]) { [weak self] event in
                 MainActor.assumeIsolated { self?.handle(event, currentFlags: UInt(CGEventSource.flagsState(.combinedSessionState).rawValue)) }; return event
@@ -55,6 +56,7 @@ struct Shortcut {
                 Task { @MainActor in self?.handle(event, currentFlags: currentFlags) }
             }
         }
+        if cancelState.shouldRegister { registerCancel() }
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.sessionDidBecomeActiveNotification, NSWorkspace.screensDidWakeNotification, NSWorkspace.didActivateApplicationNotification] {
             workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -70,14 +72,25 @@ struct Shortcut {
     private func register(_ shortcut: Shortcut, id: UInt32) {
         guard !shortcut.modifierOnly else { return }
         var ref: EventHotKeyRef?
-        if RegisterEventHotKey(UInt32(shortcut.code), shortcut.carbonFlags, EventHotKeyID(signature: 0x4c545453, id: id), GetApplicationEventTarget(), 0, &ref) == noErr, let ref { refs[id] = ref } else { registrationFailed = true }
+        let status = RegisterEventHotKey(UInt32(shortcut.code), shortcut.carbonFlags, EventHotKeyID(signature: 0x4c545453, id: id), GetApplicationEventTarget(), 0, &ref)
+        traceCancel("register id=\(id) code=\(shortcut.code) modifiers=\(shortcut.carbonFlags) status=\(status)")
+        if status == noErr, let ref { refs[id] = ref } else { registrationFailed = true }
     }
     func setRecording(_ value: Bool) {
-        guard recording != value else { return }; recording = value
-        if value { register(Shortcut.cancel, id: 3) } else if let ref = refs.removeValue(forKey: 3) { UnregisterEventHotKey(ref) }
+        guard recording != value else { return }; cancelState.setRecording(value)
+        if cancelState.shouldRegister { registerCancel() } else if let ref = refs.removeValue(forKey: 3) { UnregisterEventHotKey(ref); traceCancel("unregistered") } else { traceCancel("inactive") }
         active.remove(3)
     }
+    private func traceCancel(_ status: String) {
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE cancel %@", status) }
+    }
+    private func registerCancel() {
+        let shortcut = Shortcut.cancel
+        if shortcut.modifierOnly { traceCancel("modifier cancel uses flags monitor") }
+        else { register(shortcut, id: 3) }
+    }
     private func dispatch(_ id: UInt32, _ down: Bool) {
+        traceCancel("dispatch id=\(id) down=\(down) recording=\(recording)")
         guard !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return }
         if id == 1 { if toggleState.key(down) { onShortcut?(true) }; return }
         if down { toggleState.usedInChord(); guard active.insert(id).inserted else { return } } else { guard active.remove(id) != nil else { return } }
@@ -88,7 +101,10 @@ struct Shortcut {
             guard event.buttonNumber == (SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1) else { return }
             dispatch(4, event.type == .otherMouseDown); return
         }
-        if event.type == .keyDown { toggleState.usedInChord(); return }
+        if event.type == .keyDown {
+            toggleState.usedInChord()
+            return
+        }
         let shortcuts: [(UInt32, Shortcut)] = [(1, .toggle)] + (pushAvailable ? [(2, .push)] : []) + (recording ? [(3, .cancel)] : [])
         let masks: [Int: UInt] = [54: 0x10, 55: 0x08, 56: 0x02, 60: 0x04, 58: 0x20, 61: 0x40, 59: 0x01, 62: 0x2000]
         if Shortcut.toggle.modifierOnly {
@@ -108,6 +124,8 @@ struct Shortcut {
         active.removeAll()
     }
     func stop() {
+        cancelState.setInstalled(false)
+        traceCancel("monitor stopped")
         for ref in refs.values { UnregisterEventHotKey(ref) }; refs.removeAll()
         if let handler { RemoveEventHandler(handler) }; handler = nil
         if let global { NSEvent.removeMonitor(global) }; global = nil

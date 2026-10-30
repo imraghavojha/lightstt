@@ -55,8 +55,9 @@ precondition(waveform.count == 10 && waveform.allSatisfy { $0 > 0 && $0 <= 1 })
 print("Waveform checks passed")
 final class FakeVolume: OutputVolumeControlling {
     var values: [UInt32: Float] = [1: 0.8, 2: 0.4]
+    var quantize = false
     func volumes() -> [(UInt32, Float)] { values.sorted { $0.key < $1.key }.map { ($0.key, $0.value) } }
-    func setVolume(_ value: Float, channel: UInt32) { values[channel] = value }
+    func setVolume(_ value: Float, channel: UInt32) { values[channel] = quantize ? (value * 10).rounded() / 10 : value }
 }
 for factor: Float in [0, 0.3] {
     let output = FakeVolume(), session = OutputVolumeSession(controller: output)
@@ -70,3 +71,36 @@ print("Output volume restoration checks passed")
 let changedOutput = FakeVolume(), changedSession = OutputVolumeSession(controller: changedOutput)
 changedSession.begin(factor: 0.3); changedOutput.values[1] = 0.5; changedSession.end()
 precondition(changedOutput.values[1] == 0.5 && changedOutput.values[2] == 0.4)
+let quantizedOutput = FakeVolume(), quantizedSession = OutputVolumeSession(controller: quantizedOutput)
+quantizedSession.begin(factor: 0.3)
+quantizedOutput.values[1] = 0.25 // A small deliberate change from 0.24 must survive.
+quantizedSession.end()
+precondition(quantizedOutput.values[1] == 0.25 && quantizedOutput.values[2] == 0.4)
+print("Output user adjustment checks passed")
+let device = FakeVolume(), deviceSession = OutputVolumeSession(controller: device)
+device.quantize = true
+deviceSession.begin(factor: 0.3)
+precondition(device.values[1] == 0.2)
+deviceSession.end()
+precondition(device.values[1] == 0.8 && device.values[2] == 0.4)
+print("Quantized readback restoration checks passed")
+let gate = MediaGate()
+let first = gate.start(); gate.setOperation(first); gate.stop()
+precondition(gate.ifStopped { true })
+gate.stop() // A stop followed by an error must not invalidate restoration.
+precondition(gate.ifStopped { true })
+_ = gate.start()
+var sent = false
+precondition(!gate.ifStopped { sent = true; return true } && !sent)
+print("New recording blocks pending media resume")
+
+let intent = MediaIntentTracker()
+intent.begin(); intent.playbackChanged(false)
+precondition(intent.finish { true })
+intent.begin(); intent.playbackChanged(false); intent.playbackChanged(true); intent.playbackChanged(false)
+precondition(!intent.finish { true })
+intent.begin(); intent.playbackChanged(false); intent.playerChanged()
+precondition(!intent.finish { true })
+intent.begin()
+precondition(!intent.finish { true })
+print("Media intent changes prevent automatic resume")
