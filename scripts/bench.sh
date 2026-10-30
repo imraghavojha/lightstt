@@ -2,9 +2,35 @@
 # Unattended measurements; raw evidence is retained in a temporary directory.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-if [[ "${LIGHTTTS_BENCH_SKIP_BUILD:-0}" != 1 ]]; then scripts/build-app.sh; fi
-exec python3 - "$@" <<'PY'
-import os, subprocess, tempfile, time, re, statistics, pathlib
+bench_dir="$(mktemp -d "${TMPDIR:-/tmp}/lighttts-bundle.XXXXXX")"
+trap 'rm -rf "$bench_dir"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+CONFIG="${LIGHTTTS_BUILD_CONFIGURATION:-release}"
+swift build -c "$CONFIG"
+BIN="$(swift build -c "$CONFIG" --show-bin-path)"
+APP="$bench_dir/LightTTS.app"
+mkdir -p "$APP/Contents/"{MacOS,Resources,Frameworks,Helpers}
+cp "$BIN/LightTTS" "$APP/Contents/MacOS/LightTTS"
+cp "$BIN/LightTTSEngine" "$APP/Contents/Helpers/LightTTSEngine"
+install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/Helpers/LightTTSEngine"
+for bundle in "$BIN"/*.bundle; do [ -e "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"; done
+for framework in "$BIN"/*.framework; do [ -e "$framework" ] && cp -R "$framework" "$APP/Contents/Frameworks/"; done
+cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleExecutable</key><string>LightTTS</string><key>CFBundleIdentifier</key><string>com.lighttts.app</string><key>CFBundleName</key><string>LightTTS</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>CFBundleShortVersionString</key><string>0.1</string><key>LSMinimumSystemVersion</key><string>14.0</string><key>LSUIElement</key><true/><key>NSMicrophoneUsageDescription</key><string>LightTTS records speech for local transcription.</string></dict></plist>
+PLIST
+KEYCHAIN="$HOME/Library/Keychains/lighttts-signing.keychain-db"
+security unlock-keychain -p lighttts-local "$KEYCHAIN"
+HASH="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/"LightTTS Dev Signing"/ {print $2; exit}')"
+[[ -n "$HASH" ]] || { echo "LightTTS signing identity is missing; run scripts/setup-signing.sh." >&2; exit 1; }
+codesign --force --sign "$HASH" --keychain "$KEYCHAIN" "$APP/Contents/Helpers/LightTTSEngine"
+codesign --force --deep --sign "$HASH" --keychain "$KEYCHAIN" "$APP"
+codesign --force --sign "$HASH" --keychain "$KEYCHAIN" --requirements "=designated => identifier \"com.lighttts.app\" and certificate leaf = H\"$HASH\"" "$APP"
+codesign --verify --deep --strict "$APP"
+python3 - "$APP" "$@" <<'PY'
+import os, subprocess, tempfile, time, re, statistics, pathlib, signal, sys
 out = pathlib.Path(tempfile.mkdtemp(prefix='lighttts-bench-'))
 print('Evidence:', out, flush=True)
 def run(args):
@@ -59,22 +85,30 @@ def settle(path, label, launch):
     print(label, 'idle measurement unavailable after 3 attempts', flush=True)
     return None
 superpath = '/Applications/superwhisper.app/Contents/MacOS/superwhisper'
-lightpath = os.path.expanduser('~/Applications/LightTTS.app/Contents/MacOS/LightTTS')
+lightpath = str(pathlib.Path(sys.argv[1]) / 'Contents/MacOS/LightTTS')
+installed_path = os.path.expanduser('~/Applications/LightTTS.app/Contents/MacOS/LightTTS')
+installed_running = bool(pids(installed_path))
+super_running = bool(pids(superpath))
+print('Initially running: installed LightTTS:', installed_running, 'SuperWhisper:', super_running, flush=True)
+aiff, wav = out / 'speech.aiff', out / 'speech.wav'
+if run(['say', '-o', str(aiff), 'This is a local speech recognition test.']).returncode or run(['afconvert', '-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', str(aiff), str(wav)]).returncode:
+    raise RuntimeError('Fixture audio generation failed')
+def interrupted(signum, frame):
+    raise SystemExit(128 + signum)
+signal.signal(signal.SIGTERM, interrupted)
+signal.signal(signal.SIGINT, interrupted)
 lightlog = open(out / 'light-launch.log', 'w')
 def lightlaunch(attempt):
     print('lighttts spawn uptime:', time.monotonic(), flush=True)
-    subprocess.Popen([lightpath], env=dict(os.environ, LIGHTTTS_TEST_TRACE='1'), stdout=lightlog, stderr=lightlog, start_new_session=True)
+    subprocess.Popen([lightpath], env=dict(os.environ, LIGHTTTS_TEST_AUDIO=str(wav), LIGHTTTS_TEST_PASTE='0', LIGHTTTS_TEST_AUTOSTART='0', LIGHTTTS_TEST_TRACE='1'), stdout=lightlog, stderr=lightlog, start_new_session=True)
 def fixture():
     terminate(lightpath)
-    aiff, wav = out / 'speech.aiff', out / 'speech.wav'
-    if run(['say', '-o', str(aiff), 'This is a local speech recognition test.']).returncode or run(['afconvert', '-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', str(aiff), str(wav)]).returncode:
-        print('Fixture audio generation failed', flush=True); return
     logfile = out / 'fixture.log'
-    env = dict(os.environ, LIGHTTTS_TEST_AUDIO=str(wav), LIGHTTTS_TEST_AUTOSTART='1', LIGHTTTS_TEST_AUTOSTOP_SECONDS='9', LIGHTTTS_TEST_MODEL='whisper-tiny.en', LIGHTTTS_TEST_TRACE='1', NSUnbufferedIO='YES')
+    env = dict(os.environ, LIGHTTTS_TEST_AUDIO=str(wav), LIGHTTTS_TEST_PASTE='0', LIGHTTTS_TEST_AUTOSTART='1', LIGHTTTS_TEST_AUTOSTOP_SECONDS='9', LIGHTTTS_TEST_MODEL='whisper-tiny.en', LIGHTTTS_TEST_TRACE='1', NSUnbufferedIO='YES')
     with logfile.open('w') as log:
         proc = subprocess.Popen([lightpath], env=env, stdout=log, stderr=log, start_new_session=True)
         start = time.monotonic(); completed = None; peak = 0
-        helper = os.path.expanduser('~/Applications/LightTTS.app/Contents/Helpers/LightTTSEngine')
+        helper = str(pathlib.Path(sys.argv[1]) / 'Contents/Helpers/LightTTSEngine')
         samples = []
         while time.monotonic() - start < 360 and proc.poll() is None:
             now = time.monotonic()
@@ -100,14 +134,31 @@ def fixture():
         else: print('Post-transcription footprint: N/A; completion or wait not observed', flush=True)
         terminate(lightpath)
 try:
-    settle(superpath, 'superwhisper', lambda attempt: run(['open', '-a', 'superwhisper']))
-    terminate(superpath)
+    try:
+        settle(superpath, 'superwhisper', lambda attempt: run(['open', '-a', 'superwhisper']))
+        terminate(superpath)
+    except RuntimeError as error:
+        print('SuperWhisper measurement unavailable:', error, flush=True)
     settle(lightpath, 'lighttts', lightlaunch)
     fixture()
 finally:
-    terminate(superpath)
-    terminate(lightpath)
+    # Each cleanup must run even if another fails.
+    errors = []
+    for path in ((superpath, lightpath) if not super_running else (lightpath,)):
+        try: terminate(path)
+        except Exception as error: errors.append(str(error))
+    for was_running, path, app in (
+        (super_running, superpath, '/Applications/superwhisper.app'),
+        # The installed LightTTS process is never signalled by this benchmark.
+        (installed_running, installed_path, os.path.expanduser('~/Applications/LightTTS.app')),
+    ):
+        try:
+            if was_running and not pids(path):
+                result = run(['open', app])
+                if result.returncode: errors.append('Could not restore ' + app + ': ' + result.stdout)
+        except Exception as error: errors.append('Could not restore ' + app + ': ' + str(error))
     lightlog.close()
+    if errors: raise RuntimeError('; '.join(errors))
 print('Launch to menu: LightTTS trace recorded; SuperWhisper N/A without non-prompting menu observation.', flush=True)
 print('Transcription and stop-to-paste: N/A unless independently measured.', flush=True)
 PY
