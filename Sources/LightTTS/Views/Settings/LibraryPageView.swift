@@ -44,7 +44,7 @@ struct LibraryPageView: View {
     }
     @ViewBuilder private var content: some View {
             if state.groups.isEmpty {
-                VStack { Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).padding(.top, 135); Spacer() }.frame(maxWidth: .infinity)
+                VStack { Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).padding(.top, 133); Spacer() }.frame(maxWidth: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
@@ -54,7 +54,7 @@ struct LibraryPageView: View {
                                 recording(item)
                             }
                         }
-                    }.padding(.leading, 24).padding(.trailing, 33).padding(.top, 16).padding(.bottom, 20)
+                    }.padding(.leading, 24).padding(.trailing, 33).padding(.top, 20).padding(.bottom, 20)
                 }.id(controller.historySearch)
             }
     }
@@ -71,22 +71,31 @@ struct LibraryPageView: View {
     private func recording(_ item: HistoryEntry) -> some View {
         let expanded = controller.selectedHistory?.id == item.id
         return VStack(alignment: .leading, spacing: 12) {
-            Button {
-                controller.stopHistoryPlayback(); controller.historySegmented = false
-                controller.selectedHistory = expanded ? nil : item
-            } label: {
-                Text(item.text).lineLimit(expanded ? nil : 2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            HStack(spacing: 8) {
+                Button {
+                    controller.stopHistoryPlayback(); controller.historySegmented = false
+                    controller.selectedHistory = expanded ? nil : item
+                } label: {
+                    Text(item.text).lineLimit(expanded ? nil : 2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                if !expanded && controller.hoveredHistoryID == item.id {
+                    Menu {
+                        Button("Copy") { copy(item) }
+                        Button("Delete", role: .destructive) { controller.deleteHistory(item.id) }
+                    } label: { Image(systemName: "ellipsis").font(.system(size: 14)) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                }
+            }
             if expanded {
                 player(item)
                 HStack {
                     HStack(spacing: 0) {
                         segmentButton("Original", selected: !controller.historySegmented) { controller.stopHistoryPlayback(); controller.historySegmented = false }
                         segmentButton("Segmented", selected: controller.historySegmented) { controller.stopHistoryPlayback(); controller.historySegmented = true }.disabled(item.segments?.isEmpty ?? true)
-                    }.padding(2).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                    }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
-                    action("doc.on.doc", "Copy") { copy(item) }
-                    Button {} label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).disabled(true).help("Process again is not available")
+                    action("doc.on.doc.fill", "Copy") { copy(item) }
+                    Button {} label: { Image(systemName: "sparkle") .overlay(Circle().stroke(lineWidth: 1).frame(width: 12, height: 12)) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
                     action("info.circle", "Recording information") { state.drawer = true }
                     action("trash", "Delete") { controller.deleteHistory(item.id); controller.selectedHistory = nil }
                 }.font(.system(size: 12))
@@ -101,21 +110,31 @@ struct LibraryPageView: View {
         }.padding(16).background(cardColor, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.05), lineWidth: 0.5))
             .opacity(controller.selectedHistory == nil || expanded ? 1 : 0.55)
+            .onHover { hovering in controller.hoveredHistoryID = hovering ? item.id : nil }
             .contextMenu { Button("Copy") { copy(item) }; Button("Delete", role: .destructive) { controller.deleteHistory(item.id); if expanded { controller.selectedHistory = nil } } }
     }
     private func player(_ item: HistoryEntry) -> some View {
         HStack(spacing: 10) {
             Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.plain).disabled(controller.historyAudioURL(item) == nil)
-            HStack(spacing: 1) {
+            GeometryReader { geometry in
                 if let waveform = item.waveform, !waveform.isEmpty {
-                    ForEach(Array(waveform.enumerated()), id: \.offset) { _, amplitude in Capsule().fill(Color.primary.opacity(0.55)).frame(width: 1, height: max(2, CGFloat(amplitude) * 20)) }
-                } else { Image(systemName: "waveform").foregroundStyle(.secondary) }
-            }.frame(maxWidth: .infinity, minHeight: 26).clipped()
+                    HStack(spacing: 0) {
+                        ForEach(Array(waveform.enumerated()), id: \.offset) { _, amplitude in
+                            Capsule().fill(Color.primary.opacity(0.55))
+                                .frame(width: 1, height: max(2, CGFloat(amplitude) * 20))
+                                .frame(width: geometry.size.width / CGFloat(waveform.count))
+                        }
+                    }.frame(height: geometry.size.height)
+                } else {
+                    Image(systemName: "waveform").foregroundStyle(.secondary)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+            }.frame(height: 26).clipped()
             Text(item.recordingDuration.map(duration) ?? "0:00").font(.caption).foregroundStyle(.secondary)
         }.padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
     private func segmentButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).padding(.horizontal, 10).padding(.vertical, 5).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(.plain)
+        Button(action: action) { Text(title).frame(maxWidth: .infinity).frame(height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(.plain)
     }
     private func action(_ icon: String, _ help: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) { Image(systemName: icon).frame(width: 24, height: 24) }.buttonStyle(.plain).help(help)
@@ -126,24 +145,37 @@ struct LibraryPageView: View {
                 action("chevron.left", "Close information") { state.drawer = false }
                 Spacer(); Text(item.date.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 13, weight: .bold)); Spacer()
                 Color.clear.frame(width: 24, height: 24)
-            }.padding(.horizontal, 12).frame(height: 48)
+            }.padding(.horizontal, 12).frame(height: 44)
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
             VStack(spacing: 12) {
-                HStack { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").fontWeight(.bold); Spacer(); Text("LightTTS").font(.caption).foregroundStyle(.secondary) }.padding(14).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
+                HStack { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").fontWeight(.bold); Spacer(); providerBadge }.padding(.horizontal, 14).frame(height: 49).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
                 VStack(spacing: 12) {
-                    metadataRow("mic.fill", item.inputName ?? "Not available", item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—", .pink)
-                    metadataRow("waveform", item.modelName ?? "Not available", item.processingDuration.map { String(format: "%.0f ms", $0 * 1000) } ?? "—", .purple)
+                    metadataRow("headphones", item.inputName ?? "Not available", item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—", .pink)
+                    metadataRow("provider", item.modelName ?? "Not available", item.processingDuration.map { String(format: "%.0f ms", $0 * 1000) } ?? "—", .purple)
                 }.padding(14).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
                 Spacer()
                 HStack(spacing: 8) {
                     Button("Report issue") { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/issues/new")!) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
                     Button("Open file location") { controller.revealHistory(item) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.blue, in: RoundedRectangle(cornerRadius: 7)).foregroundStyle(.white)
                 }.buttonStyle(.plain).font(.system(size: 11))
-            }.padding(16)
+            }.padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 16)
         }.frame(maxHeight: .infinity).background(scheme == .dark ? Color(red: 44/255, green: 47/255, blue: 52/255) : Color(white: 0.95)).shadow(color: .black.opacity(0.2), radius: 8, x: -3)
     }
     private func metadataRow(_ icon: String, _ title: String, _ value: String, _ color: Color) -> some View {
-        HStack(spacing: 8) { Image(systemName: icon).foregroundStyle(.white).frame(width: 26, height: 26).background(color, in: RoundedRectangle(cornerRadius: 6)); Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.caption).foregroundStyle(.secondary) }.font(.system(size: 12))
+        HStack(spacing: 8) {
+            if icon == "provider" { providerBadge }
+            else { Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.white).frame(width: 20, height: 20).background(color, in: RoundedRectangle(cornerRadius: 5)) }
+            Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.caption).foregroundStyle(.secondary)
+        }.font(.system(size: 12))
+    }
+    private var providerBadge: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.15))
+            ForEach(0..<3) { index in
+                RoundedRectangle(cornerRadius: 4).stroke(Color.white, lineWidth: 0.8)
+                    .frame(width: 7, height: 13).rotationEffect(.degrees(Double(index) * 60))
+            }
+        }.frame(width: 20, height: 20)
     }
     private func duration(_ value: Double) -> String { let seconds = max(0, Int(value)); return String(format: "%d:%02d", seconds / 60, seconds % 60) }
     private func copy(_ item: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(item.text, forType: .string) }
