@@ -5,7 +5,8 @@ struct ShortcutRecorder: NSViewRepresentable {
     let codeKey: String
     let modifiersKey: String?
     let fallbackCode: Int
-    func makeNSView(context: Context) -> ShortcutButton { ShortcutButton(codeKey: codeKey, modifiersKey: modifiersKey, fallbackCode: fallbackCode) }
+    var enabledKey: String? = nil
+    func makeNSView(context: Context) -> ShortcutButton { ShortcutButton(codeKey: codeKey, modifiersKey: modifiersKey, fallbackCode: fallbackCode, enabledKey: enabledKey) }
     func updateNSView(_ view: ShortcutButton, context: Context) { view.refresh() }
 }
 final class ShortcutButton: NSButton {
@@ -13,10 +14,11 @@ final class ShortcutButton: NSButton {
     let codeKey: String
     let modifiersKey: String?
     let fallbackCode: Int
+    let enabledKey: String?
     private var recording = false
-    init(codeKey: String, modifiersKey: String?, fallbackCode: Int) {
-        self.codeKey = codeKey; self.modifiersKey = modifiersKey; self.fallbackCode = fallbackCode
-        super.init(frame: .zero); bezelStyle = .rounded; target = self; action = #selector(begin); refresh()
+    init(codeKey: String, modifiersKey: String?, fallbackCode: Int, enabledKey: String?) {
+        self.codeKey = codeKey; self.modifiersKey = modifiersKey; self.fallbackCode = fallbackCode; self.enabledKey = enabledKey
+        super.init(frame: .zero); bezelStyle = .rounded; controlSize = .small; font = .systemFont(ofSize: 11, weight: .medium); target = self; action = #selector(begin); refresh()
     }
     required init?(coder: NSCoder) { fatalError() }
     @objc private func begin() { recording = true; Self.isRecording = true; title = "Press shortcut…"; window?.makeFirstResponder(self) }
@@ -26,13 +28,16 @@ final class ShortcutButton: NSButton {
         let flags = event.modifierFlags.intersection([.option, .command, .control, .shift])
         if modifiersKey != nil && flags.isEmpty { NSSound.beep(); return }
         UserDefaults.standard.set(Int(event.keyCode), forKey: codeKey)
+        if let enabledKey { UserDefaults.standard.set(true, forKey: enabledKey) }
         if let modifiersKey { UserDefaults.standard.set(Int(flags.rawValue), forKey: modifiersKey); UserDefaults.standard.set(false, forKey: "rightOption") }
         recording = false; Self.isRecording = false; refresh(); window?.makeFirstResponder(nil)
     }
     override func resignFirstResponder() -> Bool { recording = false; Self.isRecording = false; refresh(); return super.resignFirstResponder() }
     func refresh() {
         guard !recording else { return }
-        let defaults = UserDefaults.standard; let code = defaults.object(forKey: codeKey) as? Int ?? fallbackCode
+        let defaults = UserDefaults.standard
+        if let enabledKey, !defaults.bool(forKey: enabledKey) { title = "Record…"; return }
+        let code = defaults.object(forKey: codeKey) as? Int ?? fallbackCode
         let raw = modifiersKey.flatMap { defaults.object(forKey: $0) as? Int } ?? (modifiersKey == nil ? 0 : Int(NSEvent.ModifierFlags.option.rawValue))
         let flags = NSEvent.ModifierFlags(rawValue: UInt(raw))
         let prefix = (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "") + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "")
