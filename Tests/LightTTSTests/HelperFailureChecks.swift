@@ -116,7 +116,16 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         precondition(!capture.isActive && controller.audio == nil)
         controller.handleShortcut(true); controller.handleShortcut(false)
         precondition(controller.state == "recording", "next shortcut should start capture")
-        controller.cancel(); withExtendedLifetime(crashing) {}
+        controller.cancel()
+        precondition(controller.state == "idle" && !controller.recordingPanelVisible, "cancel must hide the panel")
+        controller.fail("Test failure")
+        precondition(controller.state == "error" && controller.recordingPanelVisible && controller.recordingPanelTransparent)
+        try await Task.sleep(nanoseconds: 4_300_000_000)
+        fputs("dismiss state=\(controller.state) visible=\(controller.recordingPanelVisible) message=\(controller.message)\n", stderr)
+        precondition(controller.state == "idle" && !controller.recordingPanelVisible, "errors must dismiss without a view timer")
+        controller.refreshRecordingWindow()
+        precondition(!controller.recordingPanelVisible, "idle panel must remain hidden")
+        withExtendedLifetime(crashing) {}
         print("helper timeout, cancellation, relaunch and capture crash checks passed")
     }
 }

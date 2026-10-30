@@ -24,18 +24,6 @@ extension ConfigurationPageView {
                     icons: ["waveform", "waveform", "eye.slash"]
                 ).padding(.trailing, 4)
             }.padding(.top, 12).padding(.bottom, 10)
-            PageRule()
-            HStack(spacing: 8) {
-                Text("Always show")
-                Image(systemName: "questionmark.circle").help(
-                    "Keep the mini recording window visible")
-                Spacer()
-                Toggle("", isOn: $alwaysShow).labelsHidden().toggleStyle(
-                    ReferenceSwitchStyle(label: "Always show")
-                ).disabled(recordingWindow != "Mini")
-            }.frame(height: 45)
-        }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }.onChange(
-            of: alwaysShow
-        ) { _ in controller.refreshRecordingWindow() }
+        }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }
     }
 }
