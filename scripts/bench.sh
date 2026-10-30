@@ -15,7 +15,11 @@ cp "$BIN/LightTTS" "$APP/Contents/MacOS/LightTTS"
 cp "$BIN/LightTTSEngine" "$APP/Contents/Helpers/LightTTSEngine"
 install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/Helpers/LightTTSEngine"
 for bundle in "$BIN"/*.bundle; do [ -e "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"; done
-for framework in "$BIN"/*.framework; do [ -e "$framework" ] && cp -R "$framework" "$APP/Contents/Frameworks/"; done
+for framework in "$BIN"/*.framework; do
+    [ -e "$framework" ] || continue
+    name="$(basename "$framework")"
+    if otool -L "$BIN/LightTTS" "$BIN/LightTTSEngine" | grep -Fq "@rpath/$name/"; then cp -R "$framework" "$APP/Contents/Frameworks/"; fi
+done
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
