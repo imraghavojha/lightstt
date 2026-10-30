@@ -10,6 +10,7 @@ import LightTTSCore
     private var window: NSWindow?
     private var previousApp: NSRunningApplication?
     private var openingSettings = false
+    private var expanded = false
 
     init(app: AppController) {
         self.app = app
@@ -23,6 +24,11 @@ import LightTTSCore
         popover.delegate = self
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
             popover.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
+        }
+        if CommandLine.arguments.contains("--settings-window") { showDetachedSettings() }
+        else if CommandLine.arguments.contains("--settings-popover") {
+            expanded = true; updateContent(attached: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showCompact() }
         }
         if ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showCompact() }
@@ -63,7 +69,7 @@ import LightTTSCore
 
     @objc private func togglePopover() {
         if popover.isShown { popover.performClose(nil) }
-        else { showCompact() }
+        else { expanded = false; updateContent(attached: true); showCompact() }
     }
     private func showCompact() {
         guard let button = status.button else { return }
@@ -75,14 +81,28 @@ import LightTTSCore
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
     private func showSettings() {
+        expanded = true
+        updateContent(attached: true)
+    }
+    private func showDetachedSettings() {
         openingSettings = true
         popover.performClose(nil)
         openingSettings = false
         if let window { window.makeKeyAndOrderFront(nil) }
         else {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 650, height: 440), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            w.title = "LightTTS"; w.isReleasedWhenClosed = false; w.delegate = self; window = w
-            updateContent(attached: false); w.center(); w.makeKeyAndOrderFront(nil)
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
+            w.standardWindowButton(.zoomButton)?.isHidden = true
+            w.title = "LightTTS"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
+            w.isReleasedWhenClosed = false; w.delegate = self; window = w
+            updateContent(attached: false); w.setFrame(NSRect(x: 0, y: 0, width: 750, height: 508), display: false); w.center(); w.makeKeyAndOrderFront(nil)
+            DispatchQueue.main.async {
+                for (button, x) in [(NSWindow.ButtonType.closeButton, 20.0), (.miniaturizeButton, 43.0)] {
+                    if let control = w.standardWindowButton(button) {
+                        let shift = control.superview?.isFlipped == true ? 5.0 : -5.0
+                        control.setFrameOrigin(NSPoint(x: x, y: 3 + shift))
+                    }
+                }
+            }
         }
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -93,7 +113,9 @@ import LightTTSCore
         previousApp?.activate()
     }
     private func updateContent(attached: Bool) {
-        if attached {
+        if attached && expanded {
+            popover.contentViewController = NSHostingController(rootView: SettingsView(controller: app, detach: { [weak self] in self?.showDetachedSettings() }, attached: true))
+        } else if attached {
             let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.showSettings() })
             if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
                 let hosting = NSHostingController(rootView: view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
@@ -103,13 +125,14 @@ import LightTTSCore
                 popover.contentViewController = NSHostingController(rootView: view)
             }
         } else {
-            window?.contentView = NSHostingView(rootView: SettingsView(controller: app, detach: { [weak self] in self?.switchPresentation() }, attached: false))
+            let host = NSHostingView(rootView: SettingsView(controller: app, detach: { [weak self] in self?.switchPresentation() }, attached: false).ignoresSafeArea())
+            host.sizingOptions = []; window?.contentView = host
         }
     }
-    func openSettingsWindow() { showSettings() }
+    func openSettingsWindow() { showDetachedSettings() }
     private func switchPresentation() {
         window?.orderOut(nil); window = nil
-        showCompact()
+        expanded = true; updateContent(attached: true); showCompact()
     }
     func windowWillClose(_ notification: Notification) { window = nil }
 }

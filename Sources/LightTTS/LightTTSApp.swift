@@ -9,7 +9,7 @@ import Foundation
     private var catalogReady = false
     private var isUITest: Bool {
         let env = ProcessInfo.processInfo.environment
-        return env["LIGHTTTS_UI_SHOT_STATE"] != nil || env["LIGHTTTS_UI_SHOT_MENU"] == "1" || env["LIGHTTTS_TEST_AUDIO"] != nil
+        return CommandLine.arguments.contains("--ui-fixture") || env["LIGHTTTS_UI_SHOT_STATE"] != nil || env["LIGHTTTS_UI_SHOT_MENU"] == "1" || env["LIGHTTTS_TEST_AUDIO"] != nil
     }
     private func writeReadyMarker() {
         guard hotkeyReady && catalogReady, let marker = ProcessInfo.processInfo.environment["LIGHTTTS_LAUNCH_MARKER"] else { return }

@@ -4,15 +4,30 @@ import AVFoundation
 import ApplicationServices
 import CryptoKit
 import LightTTSCore
+
+import ServiceManagement
+
 import Darwin
+
 
 @MainActor final class AppController: NSObject, ObservableObject {
     @Published var state = "idle"
     @Published var settingsSelection = "Sound"
+    private var previousSettingsSelection = "Sound"
     @Published var level: Float = 0
     @Published var started = Date()
     @Published var message = ""
     @Published var history: [HistoryEntry] = []
+    @Published var historySearch = ""
+    @Published var historySearchVisible = false
+    @Published var selectedHistory: HistoryEntry?
+    @Published var hoveredHistoryID: UUID?
+    @Published var showAdvanced = false
+    @Published var playingHistoryID: UUID?
+    @Published var historySegmented = false
+    private var segmentStop: DispatchWorkItem?
+    private var historyPlayer: AVAudioPlayer?
+    @Published var loginEnabled = false
     @Published var models: [Model] = []
     @Published var busyModel: String?
     @Published var downloadProgress: Double = 0
@@ -24,7 +39,11 @@ import Darwin
     private var warmingID = ""
     private var warmingToken = UUID()
     private var warming: Task<any TranscriptionEngine, Error>?
+
     private(set) var audio: AudioCapture?
+    private let audioSettings = AudioSettings()
+    private let isTestAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
+
     private var panel: NSPanel?
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
@@ -33,8 +52,81 @@ import Darwin
     private var testAudio: [Float]?
     private var defaultsObserver: NSObjectProtocol?
     private var pressed = false
+    private var shortcutOwnsRecording = false
+    private var pushHeld = false
+    private var pushOwnsRecording = false
+    private var mouseStart: Date?
+    private var mouseOwnsRecording = false
     private var generation = 0
-    private let historyURL = ModelStore.directory.deletingLastPathComponent().appendingPathComponent("history.json")
+    @Published var historyMigration: Progress?
+    private let historyQueue = DispatchQueue(label: "com.lighttts.history", qos: .utility)
+    var historyURL: URL {
+        let fixture = CommandLine.arguments.contains("--ui-fixture") || !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
+        let configured = UserDefaults.standard.string(forKey: "historyFolder")
+        let folder = fixture ? FileManager.default.temporaryDirectory.appendingPathComponent("LightTTS-Fixture", isDirectory: true) : configured.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? ModelStore.directory.deletingLastPathComponent()
+        return folder.appendingPathComponent("history.json")
+    }
+    func changeHistoryFolder(_ destination: URL) throws {
+        let source = historyURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+        let destination = destination.standardizedFileURL.resolvingSymlinksInPath()
+        guard source != destination else { return }
+        guard historyMigration == nil, state == "idle" || state == "error" else { throw NSError(domain: "LightTTS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Wait for the current recording or folder change to finish."]) }
+        guard !destination.path.hasPrefix(source.appendingPathComponent("Recordings", isDirectory: true).path + "/") else { throw NSError(domain: "LightTTS", code: 3, userInfo: [NSLocalizedDescriptionKey: "Choose a folder outside the current Recordings folder."]) }
+        stopHistoryPlayback()
+        let progress = Progress(totalUnitCount: 0)
+        progress.isCancellable = true
+        historyMigration = progress
+        historyQueue.async { [weak self] in
+            let fm = FileManager.default
+            let names = ["history.json", "Recordings"]
+            var created: [URL] = []
+            let result: Result<Void, Error> = Result {
+                for name in names where fm.fileExists(atPath: destination.appendingPathComponent(name).path) {
+                    throw NSError(domain: "LightTTS", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected folder already contains \(name). Choose an empty folder."])
+                }
+                do {
+                    var items: [(URL, URL, Bool)] = []
+                    for name in names {
+                        let from = source.appendingPathComponent(name), to = destination.appendingPathComponent(name)
+                        var directory: ObjCBool = false
+                        guard fm.fileExists(atPath: from.path, isDirectory: &directory) else { continue }
+                        items.append((from, to, directory.boolValue))
+                        var enumerationError: Error?
+                        if directory.boolValue, let enumerator = fm.enumerator(at: from, includingPropertiesForKeys: [.isDirectoryKey], options: [], errorHandler: { _, error in enumerationError = error; return false }) {
+                            var pathComponents: [String] = []
+                            for case let url as URL in enumerator {
+                                pathComponents = Array(pathComponents.prefix(max(0, enumerator.level - 1)))
+                                pathComponents.append(url.lastPathComponent)
+                                let relative = pathComponents.joined(separator: "/")
+                                let isDirectory = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+                                items.append((url, to.appendingPathComponent(relative), isDirectory))
+                            }
+                            if let error = enumerationError { throw error }
+                        } else if directory.boolValue { throw CocoaError(.fileReadUnknown) }
+                    }
+                    progress.totalUnitCount = Int64(max(items.count, 1))
+                    for (from, to, directory) in items {
+                        if progress.isCancelled { throw CancellationError() }
+                        if to.deletingLastPathComponent() == destination { created.append(to) }
+                        if directory { try fm.createDirectory(at: to, withIntermediateDirectories: false) }
+                        else { try fm.copyItem(at: from, to: to) }
+                        progress.completedUnitCount += 1
+                    }
+                    if progress.isCancelled { throw CancellationError() }
+                } catch { for url in created { try? fm.removeItem(at: url) }; throw error }
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch result {
+                case .success: UserDefaults.standard.set(destination.path, forKey: "historyFolder"); self.saveHistory()
+                case .failure(let error): if !(error is CancellationError) { self.message = "Could not change folder: " + error.localizedDescription }
+                }
+                self.historyMigration = nil
+                self.pruneHistory()
+            }
+        }
+    }
+    func refreshModelIdleTimeout() { if state == "idle" || state == "error" { scheduleEngineUnload() } }
     override init() {
         super.init()
         let historyURL = self.historyURL
@@ -45,8 +137,23 @@ import Darwin
                 let history = (try? Data(contentsOf: historyURL)).flatMap { try? JSONDecoder().decode([HistoryEntry].self, from: $0) } ?? []
                 return (catalog + custom, Array(history.prefix(500)))
             }.value
-            self.models = data.0; self.history = data.1; LaunchTrace.mark("catalog-ready"); self.onCatalogReady?()
+
+            self.models = data.0
+            if CommandLine.arguments.contains("--ui-fixture") {
+                var sample = HistoryEntry(text: "A short sample transcription for the settings preview.", date: Date())
+                sample.inputName = "Sample microphone"; sample.modelName = "Whisper Tiny"; sample.recordingDuration = 2.7; sample.processingDuration = 0.4; sample.mode = "Voice to text"
+                if CommandLine.arguments.contains("--history-detail"), let source = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"], !source.isEmpty {
+                    let directory = historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true), name = sample.id.uuidString + ".wav"
+                    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    if (try? FileManager.default.copyItem(at: URL(fileURLWithPath: source), to: directory.appendingPathComponent(name))) != nil { sample.audioFile = name; if let samples = try? AudioFileReader.read(URL(fileURLWithPath: source)) { sample.segments = AudioProcessing.speechSegments(samples); sample.waveform = AudioProcessing.waveform(samples) } }
+                }
+                self.history = [sample, HistoryEntry(text: "Another example recording, shown here with enough text to wrap onto a second line.", date: Date()), HistoryEntry(text: "An earlier example transcription.", date: Calendar.current.date(byAdding: .day, value: -1, to: Date())!)]
+            } else { self.history = data.1; self.pruneHistory() }
+            if CommandLine.arguments.contains("--history-detail") { self.selectedHistory = self.history.first }
+            LaunchTrace.mark("catalog-ready"); self.onCatalogReady?()
+
             await ModelStore.refreshAppleStatus(); self.objectWillChange.send()
+
         }
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -56,11 +163,15 @@ import Darwin
                 if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
             }
         }
+        if UserDefaults.standard.bool(forKey: "autoCheckUpdates") && !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") { checkUpdates(interactive: false) }
+        if let index = CommandLine.arguments.firstIndex(of: "--settings-page"), CommandLine.arguments.indices.contains(index + 1) { settingsSelection = CommandLine.arguments[index + 1] }
+        if isTestAudio { DistributedNotificationCenter.default().addObserver(self, selector: #selector(testAudioToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(Bundle.main.bundleIdentifier ?? "app")"), object: nil) }
         #if DEBUG
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testHIDShortcut(_:)), name: Notification.Name("com.lighttts.test.hid.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
         #endif
     }
+    @objc private func testAudioToggle(_ notification: Notification) { if state == "recording" { stop() } else if state == "idle" { start() } }
     #if DEBUG
     func testURLToggle() { handleShortcut(true); handleShortcut(false) }
     @objc private func testToggle(_ notification: Notification) { testURLToggle() }
@@ -71,6 +182,12 @@ import Darwin
         }
     }
     #endif
+    func selectSettings(_ selection: String) {
+        if selection == "Library" && settingsSelection != "Library" { previousSettingsSelection = settingsSelection }
+        if selection != "Library" { stopHistoryPlayback(); selectedHistory = nil; historySearchVisible = false; historySearch = "" }
+        settingsSelection = selection
+    }
+    func leaveLibrary() { historySearchVisible = false; historySearch = ""; selectSettings(previousSettingsSelection) }
     func warmSelected() {
         let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
         guard selected != loadedID, selected != warmingID, let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { return }
@@ -100,7 +217,10 @@ import Darwin
         engine = nil; loadedID = ""
     }
     @discardableResult func installHotkey() -> Bool {
+        guard !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") else { return false }
         hotkey.onShortcut = { [weak self] down in self?.handleShortcut(down) }
+        hotkey.onPush = { [weak self] down in self?.handlePush(down) }
+        hotkey.onMouse = { [weak self] down in self?.handleMouse(down) }
         hotkey.onEscape = { [weak self] in if self?.state != "idle" { self?.cancel() } }
         let installed = hotkey.install()
         if !installed { message = "Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut." }
@@ -115,19 +235,35 @@ import Darwin
         if down && !pressed {
             pressed = true
             if state == "error" { cancel() }
-            if UserDefaults.standard.bool(forKey: "pushToTalk") { start() }
+            if UserDefaults.standard.bool(forKey: "pushToTalk") { if state == "idle" { shortcutOwnsRecording = true; start() } }
             else if state == "starting" { cancel() }
             else if state == "recording" { stop() }
             else if state == "idle" { start() }
         } else if !down && pressed {
             pressed = false
-            if UserDefaults.standard.bool(forKey: "pushToTalk") {
+            if shortcutOwnsRecording {
+                shortcutOwnsRecording = false
                 if state == "starting" { cancel() } else if state == "recording" { stop() }
             }
         }
     }
+    private func handlePush(_ down: Bool) {
+        pushHeld = down
+        if down { if state == "idle" { pushOwnsRecording = true; start() } }
+        else if pushOwnsRecording { pushOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
+    }
+    private func handleMouse(_ down: Bool) {
+        if down {
+            mouseStart = Date()
+            if state == "idle" { mouseOwnsRecording = true; start() }
+            else if state == "recording" { mouseOwnsRecording = false; stop() }
+        } else if let startTime = mouseStart {
+            mouseStart = nil
+            if mouseOwnsRecording && Date().timeIntervalSince(startTime) >= 0.3 { mouseOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
+        }
+    }
     func start() {
-        guard state == "idle" else { return }
+        guard state == "idle", historyMigration == nil else { return }
         unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         state = "starting"
@@ -145,7 +281,7 @@ import Darwin
         Task {
             if sessionAutoPaste {
                 let target = await Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }.value
-                guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
+                guard current == generation, state == "starting" else { return }
                 guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
                 focus = target
             }
@@ -162,20 +298,30 @@ import Darwin
                 return
             }
             #endif
-            let allowed = await AVCaptureDevice.requestAccess(for: .audio)
-            guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
+            let allowed: Bool
+            if isTestAudio { allowed = true } else { allowed = await AVCaptureDevice.requestAccess(for: .audio) }
+            guard current == generation, state == "starting" else { return }
             guard allowed else { fail("Microphone access is required. Enable it in System Settings."); return }
             do {
                 let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
-                try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
+                let manageAudio = !isTestAudio || ProcessInfo.processInfo.environment["LIGHTTTS_TEST_VOLUME"] == "1"
+                if manageAudio { message = audioSettings.begin() ?? "" }
+                do { try capture.start() } catch { if manageAudio { audioSettings.end() }; throw error }
+                audio = capture; AudioSettings.cue(start: true); started = Date(); state = "recording"; if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }; showPanel()
             } catch { fail(error.localizedDescription) }
         }
     }
     func stop() {
         guard state == "recording" else { return }
+
         LaunchTrace.mark("recording-stopped")
-        let samples = testAudio ?? audio?.stop() ?? []
-        testAudio = nil; audio = nil; state = "processing"; let current = generation
+        let rawSamples = testAudio ?? audio?.stop() ?? []
+        let recordingDate = started, recordDuration = Double(rawSamples.count) / 16000
+        let inputID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
+        let inputName = inputID.isEmpty ? "System default" : (AVCaptureDevice.devices(for: .audio).first { $0.uniqueID == inputID }?.localizedName ?? "Microphone")
+        let processingStart = Date()
+        testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
+
         processing = Task {
             do {
                 let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
@@ -192,9 +338,13 @@ import Darwin
                     try Task.checkCancellation(); guard current == generation else { return }
                     engine = resolved; loadedID = selected
                 }
-                guard engine != nil else { return }
+                guard let engine else { return }
                 try Task.checkCancellation(); guard current == generation else { return }
-                let text = try await engine!.transcribe(samples: samples)
+
+                let remove = UserDefaults.standard.bool(forKey: "removeSilence"), normalize = UserDefaults.standard.bool(forKey: "normalizeAudio")
+                let samples = await Task.detached(priority: .userInitiated) { AudioProcessing.apply(rawSamples, removeSilence: remove, normalize: normalize) }.value
+                let text = try await engine.transcribe(samples: samples)
+
                 guard current == generation else { return }
                 if !keepModelLoaded { unloadEngine() }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
@@ -205,20 +355,41 @@ import Darwin
                     return
                 }
                 if sessionAutoPaste {
-                    guard AXIsProcessTrusted() else { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary); throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
+                    guard AXIsProcessTrusted() else { if !isTestAudio { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }; throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
                     guard let target = focus else { throw SpeechError.audio("The focused field is unavailable.") }
-                    try await Task.detached(priority: .userInitiated) { try target.insert(text) }.value
+                    let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
+                    let send = UserDefaults.standard.bool(forKey: "sendOnShift")
+                    let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
+                    try await Task.detached(priority: .userInitiated) {
+                        try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
+                    }.value
+                    if shouldCopyTranscript(autoPaste: true, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
                 } else {
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
+
                 LaunchTrace.mark("text-inserted")
-                history.insert(HistoryEntry(text: text, date: Date()), at: 0); if history.count > 500 { history.removeLast(history.count - 500) }; saveHistory(); state = "done"
+                var item = HistoryEntry(text: text, date: recordingDate)
+                item.inputName = inputName; item.recordingDuration = recordDuration; item.modelName = model.name; item.processingDuration = Date().timeIntervalSince(processingStart); item.mode = "Voice to text"
+                if !isTestAudio {
+                    let analysis = await Task.detached(priority: .utility) { (AudioProcessing.speechSegments(rawSamples), AudioProcessing.waveform(rawSamples)) }.value
+                    item.segments = analysis.0; item.waveform = analysis.1
+                    let directory = self.historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true)
+                    let filename = item.id.uuidString + ".wav"
+                    let written = await Task.detached(priority: .utility) { Self.writeRecording(rawSamples, to: directory.appendingPathComponent(filename)) }.value
+                    if written { item.audioFile = filename }
+                    if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
+                }
+                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
+
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
     }
-    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide() }
+
+    func cancel() { audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide() }
+
     private func hide() {
         state = "idle"; level = 0
         scheduleEngineUnload()
@@ -234,6 +405,7 @@ import Darwin
             }
         }
     }
+    func refreshRecordingWindow() { if state != "idle" || UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() } else { panel?.orderOut(nil) } }
     func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; level = 0; showPanel() }
     private func dismissPanel() {
         panel?.orderOut(nil)
@@ -254,7 +426,7 @@ import Darwin
         unloadTimer?.invalidate(); unloadTimer = nil
         guard engine != nil || warming != nil else { return }
         guard keepModelLoaded else { unloadEngine(); return }
-        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") as? Double ?? 120
+        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") == nil ? 120 : UserDefaults.standard.double(forKey: "modelIdleTimeoutSeconds")
         let interval = max(1, configured)
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -273,6 +445,7 @@ import Darwin
         unloadEngine(); message = text; state = "error"; showPanel()
     }
     private func showPanel() {
+        if UserDefaults.standard.string(forKey: "recordingWindow") == "None", state != "error" { return }
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
             p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
@@ -282,9 +455,71 @@ import Darwin
             if !p.isVisible { p.alphaValue = 0; p.orderFrontRegardless(); NSAnimationContext.runAnimationGroup { context in context.duration = 0.15; p.animator().alphaValue = 1 } }
             else { p.alphaValue = 1 } }
     }
-    private func saveHistory() { try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true); if let data = try? JSONEncoder().encode(history) { try? data.write(to: historyURL, options: .atomic) } }
+
+    func pruneHistory() { guard historyMigration == nil else { return }; let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; deleteRecordings(removed); history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
+    func refreshLoginStatus() { loginEnabled = SMAppService.mainApp.status == .enabled }
+    func setLoginEnabled(_ enabled: Bool) {
+        do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
+        catch { message = error.localizedDescription }
+        refreshLoginStatus()
+    }
+    func checkUpdates(interactive: Bool = true) {
+        guard let url = URL(string: "https://api.github.com/repos/imraghavojha/lighttts/releases/latest") else { return }
+        Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], let version = object["tag_name"] as? String else { throw URLError(.badServerResponse) }
+                let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+                let newer = version.trimmingCharacters(in: CharacterSet(charactersIn: "vV")).compare(current, options: .numeric) == .orderedDescending
+                if interactive || newer { let alert = NSAlert(); alert.messageText = newer ? "Update available: \(version)" : "LightTTS is up to date"; alert.informativeText = newer ? "Visit the releases page to download the update." : "You have the latest release."; alert.addButton(withTitle: newer ? "Open Releases" : "OK"); if newer { alert.addButton(withTitle: "Later") }; if alert.runModal() == .alertFirstButtonReturn && newer { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/releases/latest")!) } }
+            } catch { if interactive { let alert = NSAlert(); alert.messageText = "Couldn't check for updates"; alert.informativeText = error.localizedDescription; alert.runModal() } }
+        }
+    }
+    nonisolated private static func writeRecording(_ samples: [Float], to url: URL) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false), let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)), let data = buffer.floatChannelData?[0] else { return false }
+            buffer.frameLength = AVAudioFrameCount(samples.count); samples.withUnsafeBufferPointer { if let base = $0.baseAddress { data.update(from: base, count: samples.count) } }
+            let file = try AVAudioFile(forWriting: url, settings: format.settings); try file.write(from: buffer); return true
+        } catch { return false }
+    }
+    func historyAudioURL(_ item: HistoryEntry) -> URL? {
+        guard let file = item.audioFile, file == item.id.uuidString + ".wav" else { return nil }
+        let url = historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true).appendingPathComponent(file)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+    func stopHistoryPlayback() { segmentStop?.cancel(); segmentStop = nil; historyPlayer?.stop(); historyPlayer = nil; playingHistoryID = nil }
+    func toggleHistoryPlayback(_ item: HistoryEntry, segment: RecordingSegment? = nil) {
+        segmentStop?.cancel(); segmentStop = nil
+        if playingHistoryID == item.id { historyPlayer?.stop(); playingHistoryID = nil; return }
+        guard let url = historyAudioURL(item) else { return }
+        do {
+            historyPlayer = try AVAudioPlayer(contentsOf: url); historyPlayer?.delegate = self
+            if let segment { historyPlayer?.currentTime = segment.start }
+            historyPlayer?.play(); playingHistoryID = item.id
+            if let segment { let work = DispatchWorkItem { [weak self] in self?.historyPlayer?.stop(); self?.playingHistoryID = nil }; segmentStop = work; DispatchQueue.main.asyncAfter(deadline: .now() + max(0, segment.end - segment.start), execute: work) }
+        } catch { message = error.localizedDescription }
+    }
+    func revealHistory(_ item: HistoryEntry) { NSWorkspace.shared.activateFileViewerSelecting([historyAudioURL(item) ?? historyURL]) }
+    func deleteHistory(_ id: UUID) { guard historyMigration == nil else { return }; if playingHistoryID == id { stopHistoryPlayback() }; if let item = history.first(where: { $0.id == id }) { deleteRecordings([item]) }; history.removeAll { $0.id == id }; saveHistory() }
+    private func deleteRecordings(_ entries: [HistoryEntry]) {
+        let directory = historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true)
+        let names = entries.compactMap { item -> String? in
+            guard let name = item.audioFile, name == item.id.uuidString + ".wav" else { return nil }
+            return name
+        }
+        historyQueue.async { for name in names { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) } }
+    }
+    private func saveHistory() {
+        let snapshot = history, url = historyURL
+        historyQueue.async {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: url, options: .atomic) }
+        }
+    }
     func importLocalModel(engine: String = "whisper", version: String = "") {
         let panel = NSOpenPanel(); panel.canChooseDirectories = engine != "whisper"; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
+
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let id = "custom-" + UUID().uuidString
         do {
@@ -390,7 +625,9 @@ import Darwin
 
     }
     func cancelDownload() { downloadTask?.cancel() }
-    func prepareToQuit() async { unloadEngine(); let task = downloadTask; task?.cancel(); await task?.value }
+
+    func prepareToQuit() async { if state != "idle" { cancel() }; unloadEngine(); await audioSettings.waitForRestoration(); await withCheckedContinuation { continuation in historyQueue.async { continuation.resume() } }; let task = downloadTask; task?.cancel(); await task?.value }
+
     func download(_ model: Model) {
         guard busyModel == nil else { return }
         busyModel = model.id; downloadProgress = 0
@@ -403,4 +640,8 @@ import Darwin
     }
 
 }
-struct HistoryEntry: Codable, Identifiable { var id = UUID(); let text: String; let date: Date }
+struct HistoryEntry: Codable, Identifiable { var id = UUID(); let text: String; let date: Date; var audioFile: String? = nil; var inputName: String? = nil; var modelName: String? = nil; var recordingDuration: Double? = nil; var processingDuration: Double? = nil; var mode: String? = nil; var segments: [RecordingSegment]? = nil; var waveform: [Float]? = nil }
+
+extension AppController: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { Task { @MainActor in self.playingHistoryID = nil } }
+}
