@@ -42,7 +42,7 @@ public actor CloudEngine: TranscriptionEngine {
     }
     deinit { if ownsSession { session.invalidateAndCancel() } }
     public func transcribe(samples: [Float]) async throws -> String {
-        guard !samples.isEmpty else { throw SpeechError.audio("No audio captured.") }
+        guard !samples.isEmpty else { throw SpeechError.audio("The transcription engine received an empty audio recording.") }
         let audio = try Self.encode(samples)
         if provider == .gemini && audio.count > 14_000_000 { throw SpeechError.audio("Audio is too large for Gemini's inline upload. Shorten the recording.") }
         if provider == .groq && audio.count > 25_000_000 { throw SpeechError.audio("Audio is too large for Groq's free upload limit. Shorten the recording.") }
