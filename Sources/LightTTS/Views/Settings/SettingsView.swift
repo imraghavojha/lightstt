@@ -90,8 +90,9 @@ private struct SettingsRow<Content: View>: View {
     let title: String
     var help: String? = nil
     var height: CGFloat = 48
+    var contentOffset: CGFloat = 0
     @ViewBuilder var content: Content
-    var body: some View { HStack(spacing: 8) { Text(title).lineLimit(1).fixedSize(horizontal: true, vertical: false); if let help { Image(systemName: "info.circle").help(help) }; Spacer(); content }.frame(minHeight: height) }
+    var body: some View { HStack(spacing: 8) { Text(title).lineLimit(1).fixedSize(horizontal: true, vertical: false); if let help { Image(systemName: "info.circle").help(help) }; Spacer(); content }.offset(y: contentOffset).frame(minHeight: height) }
 }
 private struct SoundPageView: View {
     @ObservedObject var controller: AppController
@@ -109,7 +110,7 @@ private struct SoundPageView: View {
             }
             Text("Recording").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 8.5)
             SettingsCard {
-                SettingsRow(title: "Sound while recording", height: 54) {
+                SettingsRow(title: "Sound while recording", contentOffset: 5) {
                     Menu {
                         ForEach(["Keep Playing", "Pause", "Mute", "Lower", "Muffle"], id: \.self) { value in Button(value == "Pause" ? "Pause (Unavailable)" : value) { recordingSound = value }.disabled(value == "Pause") }
                     } label: {
@@ -117,7 +118,7 @@ private struct SoundPageView: View {
                     }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause is unavailable and leaves playback unchanged; Muffle lowers volume if system audio capture is unavailable.")
                 }
                 PageRule()
-                HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.frame(minHeight: 42)
+                HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.offset(y: -2).frame(minHeight: 44)
             }
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.secondary) }
         }.padding(.horizontal, 24).padding(.top, 16) }.font(.system(size: 13))
