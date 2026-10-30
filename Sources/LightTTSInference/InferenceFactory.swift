@@ -1,11 +1,11 @@
 import Foundation
 import LightTTSCore
 public enum InferenceFactory {
-    public static func engine(for model: Model) async throws -> any TranscriptionEngine {
+    public static func engine(for model: Model, cloudKey: String? = nil, cloudSession: URLSession? = nil) async throws -> any TranscriptionEngine {
         switch model.engine {
         case "cloud":
             guard let provider = model.cloudProvider, let name = model.cloudModel else { throw SpeechError.model("Cloud model configuration is incomplete.") }
-            let cloud = try CloudEngine(provider: provider, model: name, apiKey: CloudKeychain.read(id: model.id), baseURL: model.cloudEndpoint)
+            let cloud = try CloudEngine(provider: provider, model: name, apiKey: try cloudKey ?? CloudKeychain.read(id: model.id), baseURL: model.cloudEndpoint, session: cloudSession)
             if let id = model.fallbackID {
                 let custom = UserDefaults.standard.data(forKey: "customModels").flatMap { try? JSONDecoder().decode([Model].self, from: $0) } ?? []
                 if let local = (try ModelCatalog.load() + custom).first(where: { $0.id == id && $0.engine != "cloud" }), ModelStore.exists(local) { return CloudFallbackEngine(cloud: cloud, local: local) }

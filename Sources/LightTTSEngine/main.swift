@@ -37,7 +37,15 @@ import LightTTSInference
                 switch command.action {
                 case "warm":
                     guard let model = command.model else { throw SpeechError.model("Missing model") }
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["LIGHTTTS_MOCK_CLOUD"] == "1", model.engine == "cloud" {
+                        let config = URLSessionConfiguration.ephemeral
+                        config.protocolClasses = [HelperMockCloudProtocol.self]
+                        engine = try await InferenceFactory.engine(for: model, cloudKey: "unit-test-key", cloudSession: URLSession(configuration: config))
+                    } else { engine = try await InferenceFactory.engine(for: model) }
+                    #else
                     engine = try await InferenceFactory.engine(for: model)
+                    #endif
                 case "transcribe":
                     guard let engine, let path = command.audio else { throw SpeechError.model("Engine is not ready") }
                     let data = try Data(contentsOf: URL(fileURLWithPath: path))
