@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage("selectedModel") private var selectedModel = "whisper-tiny.en"
     @AppStorage("pushToTalk") private var pushToTalk = false
     @AppStorage("rightOption") private var rightOption = false
+    @AppStorage("keepModelLoaded") private var keepModelLoaded = true
     @AppStorage("customModelURL") private var customModelURL = ""
     @AppStorage("customModelSHA256") private var customModelSHA256 = ""
     @AppStorage("hotkeyCode") private var hotkeyCode = 49
@@ -34,6 +35,8 @@ struct SettingsView: View {
                 default:
                     Toggle("Push to talk", isOn: $pushToTalk)
                     Toggle("Use Right Option only", isOn: $rightOption)
+                    Toggle("Keep model loaded between recordings", isOn: $keepModelLoaded)
+                    Text("Loaded models are released after five minutes of inactivity.").font(.caption).foregroundStyle(.secondary)
                     HStack { Text("Option + key code:"); TextField("49 (Space)", value: $hotkeyCode, format: .number).frame(width: 80).disabled(rightOption) }
                     Button("Request permissions / Retry shortcut") { controller.requestPermissions() }
                     Text("Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut. Accessibility allows text insertion.").font(.caption).foregroundStyle(.secondary)

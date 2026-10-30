@@ -3,6 +3,7 @@ import SwiftUI
 import AVFoundation
 import ApplicationServices
 import LightTTSCore
+import Darwin
 
 @MainActor final class AppController: NSObject, ObservableObject {
     @Published var state = "idle"
@@ -49,6 +50,7 @@ import LightTTSCore
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == "idle", ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] == nil else { return }
+                if !self.keepModelLoaded && (self.engine != nil || self.warming != nil) { self.unloadEngine() }
                 if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
             }
         }
@@ -166,10 +168,11 @@ import LightTTSCore
                     try Task.checkCancellation(); guard current == generation else { return }
                     engine = resolved; loadedID = selected
                 }
-                guard let engine else { return }
+                guard engine != nil else { return }
                 try Task.checkCancellation(); guard current == generation else { return }
-                let text = try await engine.transcribe(samples: samples)
+                let text = try await engine!.transcribe(samples: samples)
                 guard current == generation else { return }
+                if !keepModelLoaded { unloadEngine() }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
                 if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
                     print("LIGHTTTS_TEST transcription completed, samples: \(samples.count)")
@@ -211,18 +214,27 @@ import LightTTSCore
         panel?.orderOut(nil)
         panel = nil
     }
+    private var keepModelLoaded: Bool {
+        UserDefaults.standard.object(forKey: "keepModelLoaded") as? Bool ?? true
+    }
+    private func unloadEngine() {
+        unloadTimer?.invalidate(); unloadTimer = nil
+        warmingToken = UUID(); warming?.cancel(); warming = nil; warmingID = ""
+        engine = nil; loadedID = ""
+        malloc_zone_pressure_relief(nil, 0)
+    }
     // One coalescible, non-repeating timer only while a model is resident or loading.
     // Set modelIdleTimeoutSeconds in defaults to change the five-minute default.
     private func scheduleEngineUnload() {
         unloadTimer?.invalidate(); unloadTimer = nil
         guard engine != nil || warming != nil else { return }
+        guard keepModelLoaded else { unloadEngine(); return }
         let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") as? Double ?? 300
         let interval = max(1, configured)
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == "idle" || self.state == "error" else { return }
-                self.warmingToken = UUID(); self.warming?.cancel(); self.warming = nil; self.warmingID = ""
-                self.engine = nil; self.loadedID = ""; self.unloadTimer = nil
+                self.unloadEngine()
             }
         }
         timer.tolerance = min(30, interval * 0.1)
