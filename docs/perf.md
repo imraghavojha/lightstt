@@ -1,4 +1,4 @@
-On 2026-10-30, on an Apple M1 Max (64 GB), macOS 27.0.1, with other builds running, we built and installed revision `06e9474` as a signed release with the existing identity. Each app was freshly launched and allowed two minutes to settle; `footprint` measured physical footprint and 30 two-second `top` intervals after the initial sample were averaged. LightTTS launch was timed from process spawn to its status-item trace. For transcription, a `say`-generated 16 kHz mono WAV was fed through `LIGHTTTS_TEST_AUDIO` using Whisper tiny.en; a separate run pasted into a local test text field. Footprint sampling included the app and helper approximately every two seconds. SuperWhisper exited or relaunched during all three settling attempts, so no comparable idle sample or unattended transcription was established. Values are single-run observations under load.
+On an Apple M1 Max (64 GB) running macOS 27.0.1, release builds were measured under load using footprint and top after two minutes idle and a synthetic 16 kHz WAV transcription with Whisper tiny.en.
 
 | Metric | LightTTS | SuperWhisper |
 | --- | --- | --- |

@@ -375,7 +375,6 @@ private struct RetentionPopup: View {
     }
 }
 
-/// Native pop-up interaction, with a neutral field matching the surrounding controls.
 private struct SettingsPopup: NSViewRepresentable {
     @Binding var selection: Int
     let options: [(Int, String)]
