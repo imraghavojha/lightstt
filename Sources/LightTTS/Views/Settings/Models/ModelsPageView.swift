@@ -27,7 +27,7 @@ struct ModelsPageView: View {
     @ObservedObject var controller: AppController
     @Binding var deleting: Model?
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("selectedModel") private var selectedModel = "whisper-tiny.en"
+    @AppStorage("selectedModel") private var selectedModel = ModelDefaults.selectedModel
     @AppStorage("favoriteModels") private var favorites = "whisper-large-v3,whisper-large-v3-turbo,whisper-medium,whisper-small,whisper-small.en"
     @StateObject private var ui = ModelsPageState()
 
