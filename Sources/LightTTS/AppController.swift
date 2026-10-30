@@ -161,7 +161,7 @@ import LightTTSCore
     private func fail(_ text: String) { message = text; state = "error"; showPanel() }
     private func showPanel() {
         if panel == nil {
-            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 64), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
             p.isFloatingPanel = true; p.level = .floating; p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = true
             p.contentView = NSHostingView(rootView: RecordingView(controller: self)); panel = p
         }

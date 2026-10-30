@@ -1,16 +1,32 @@
 import SwiftUI
+
 struct RecordingView: View {
     @ObservedObject var controller: AppController
+
     var body: some View {
-        HStack(spacing: 12) {
+        let idle = controller.state == "idle"
+        HStack(spacing: 2) {
             if controller.state == "recording" {
-                Circle().fill(.red).frame(width: 8, height: 8)
-                HStack(spacing: 3) { ForEach(0..<20) { i in Capsule().fill(.primary).frame(width: 3, height: max(3, CGFloat(controller.level) * CGFloat(12 + (i % 5) * 4))) } }.frame(height: 34)
-                TimelineView(.periodic(from: .now, by: 1)) { _ in Text(timerInterval: controller.started...Date.distantFuture, countsDown: false).monospacedDigit().frame(width: 58) }
-            } else if controller.state == "processing" { ProgressView().controlSize(.small); Text("Processing…") }
-            else if controller.state == "error" { Image(systemName: "exclamationmark.circle"); Text(controller.message).font(.caption).lineLimit(2) }
-            else { Image(systemName: "checkmark"); Text("Done") }
-            Spacer(minLength: 0)
-        }.padding(.horizontal, 18).frame(width: 300, height: 64).background(.regularMaterial, in: Capsule())
+                ForEach(0..<6) { index in
+                    Capsule().fill(.white)
+                        .frame(width: 2, height: max(2, 2 + CGFloat(controller.level) * [6, 10, 14, 14, 10, 6][index]))
+                }
+            } else if controller.state == "processing" {
+                ProgressView().controlSize(.mini).tint(.white)
+            } else if controller.state == "done" {
+                Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+            } else if controller.state == "error" {
+                Image(systemName: "exclamationmark.circle").font(.system(size: 13)).foregroundStyle(.white)
+                    .help(controller.message)
+            }
+        }
+        .frame(width: idle ? 48 : 60, height: idle ? 10 : 32)
+        .background(Color(red: 0.043, green: 0.043, blue: 0.047), in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.24), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        .animation(.easeOut(duration: 0.15), value: idle)
+        .animation(.easeOut(duration: 0.08), value: controller.level)
+        .frame(width: 240, height: 160)
+        .accessibilityLabel(controller.state == "error" ? controller.message : controller.state.capitalized)
     }
 }
