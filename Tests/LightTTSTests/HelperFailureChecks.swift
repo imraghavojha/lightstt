@@ -10,6 +10,24 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         return url
     }
     @MainActor static func main() async throws {
+        let defaults = SettingsDefaults.store
+        let keys = ["hotkeyCode", "hotkeyModifiers", "rightOption", "pushShortcutEnabled", "mouseShortcut"]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) } } }
+        defaults.removeObject(forKey: "hotkeyModifiers")
+        defaults.set(false, forKey: "rightOption")
+        defaults.set(0, forKey: "hotkeyCode")
+        defaults.set(true, forKey: "pushShortcutEnabled")
+        defaults.set(2, forKey: "mouseShortcut")
+        let toggle = ShortcutButton(codeKey: "hotkeyCode", modifiersKey: "hotkeyModifiers", fallbackCode: 49, enabledKey: nil)
+        let push = ShortcutButton(codeKey: "pushHotkeyCode", modifiersKey: "pushHotkeyModifiers", fallbackCode: 49, enabledKey: "pushShortcutEnabled")
+        let mouse = MouseShortcutButton()
+        precondition(toggle.title.contains("A") && mouse.title == "Mouse 3")
+        defaults.removeObject(forKey: "hotkeyCode")
+        defaults.set(false, forKey: "pushShortcutEnabled")
+        defaults.set(-1, forKey: "mouseShortcut")
+        NotificationCenter.default.post(name: .shortcutsChanged, object: nil)
+        precondition(toggle.title.contains("Space") && push.title == "Record shortcut" && mouse.title == "Record shortcut", "shortcut labels must refresh immediately")
         let url = try script("trap '' TERM\nwhile :; do sleep 1; done")
         defer { try? FileManager.default.removeItem(at: url) }
         let helper = try HelperEngine(executableURL: url, warmTimeout: 0.1)

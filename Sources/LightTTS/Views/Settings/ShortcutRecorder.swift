@@ -20,9 +20,13 @@ final class ShortcutButton: NSButton {
     private var recording = false; private var modifierCandidate: Int?
     init(codeKey: String, modifiersKey: String?, fallbackCode: Int, enabledKey: String?) {
         self.codeKey = codeKey; self.modifiersKey = modifiersKey; self.fallbackCode = fallbackCode; self.enabledKey = enabledKey
-        super.init(frame: .zero); bezelStyle = .rounded; controlSize = .small; font = .systemFont(ofSize: 11, weight: .medium); target = self; action = #selector(begin); refresh()
+        super.init(frame: .zero); bezelStyle = .rounded; controlSize = .small; font = .systemFont(ofSize: 11, weight: .medium); target = self; action = #selector(begin)
+        NotificationCenter.default.addObserver(self, selector: #selector(shortcutsChanged), name: .shortcutsChanged, object: nil)
+        refresh()
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func shortcutsChanged() { refresh() }
     @objc private func begin() { recording = true; Self.isRecording = true; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil); modifierCandidate = nil; title = "Press shortcut…"; window?.makeFirstResponder(self) }
     override var acceptsFirstResponder: Bool { true }
     override func keyDown(with event: NSEvent) {
@@ -93,10 +97,14 @@ struct MouseShortcutRecorder: NSViewRepresentable {
 final class MouseShortcutButton: NSButton {
     static var isRecording = false
     override init(frame: NSRect) {
-        super.init(frame: frame); isBordered = false; target = self; action = #selector(begin); refresh()
+        super.init(frame: frame); isBordered = false; target = self; action = #selector(begin)
+        NotificationCenter.default.addObserver(self, selector: #selector(shortcutsChanged), name: .shortcutsChanged, object: nil)
+        refresh()
     }
     convenience init() { self.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func shortcutsChanged() { refresh() }
     @objc private func begin() { Self.isRecording = true; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil); title = "Click a mouse button"; window?.makeFirstResponder(self) }
     override var acceptsFirstResponder: Bool { true }
     override func otherMouseDown(with event: NSEvent) { guard Self.isRecording else { super.otherMouseDown(with: event); return }; SettingsDefaults.store.set(event.buttonNumber, forKey: "mouseShortcut"); Self.isRecording = false; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil); refresh(); window?.makeFirstResponder(nil) }
