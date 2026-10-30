@@ -44,7 +44,10 @@ public final class InsertionService: InsertionServicing {
         } else if case .secure = result.disposition {
             warning = "Copied: secure field"
         } else if case .unavailable = result.disposition {
-            warning = "No focused editable field. The transcription was copied to the clipboard."
+            warning =
+                result.target == nil
+                ? "No focused editable field. The transcription was copied to the clipboard."
+                : "Could not auto-paste: \(FocusError.unavailable.localizedDescription). The transcription was copied to the clipboard."
         } else if let target = result.target {
             let send = settings.sendOnShift && shiftHeld()
             do {
@@ -68,8 +71,9 @@ public final class InsertionService: InsertionServicing {
         }
 
         guard isCurrent() else { return InsertionOutcome(delivery: .skipped) }
-        if warning != nil || !settings.restoreClipboard {
-            clipboard.write(text, allowClipboardHistory: settings.allowClipboardHistory)
+        let clipboardSettings = options()
+        if warning != nil || !clipboardSettings.restoreClipboard {
+            clipboard.write(text, allowClipboardHistory: clipboardSettings.allowClipboardHistory)
         }
         return InsertionOutcome(delivery: warning == nil ? .delivered : .copied, warning: warning)
     }

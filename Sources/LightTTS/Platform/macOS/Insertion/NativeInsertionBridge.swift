@@ -27,14 +27,7 @@ struct NativeFocusCapture: FocusCapturing {
 @MainActor
 struct NativeTranscriptClipboard: TranscriptClipboard {
     func write(_ text: String, allowClipboardHistory: Bool) {
-        let item = NSPasteboardItem()
-        item.setString(text, forType: .string)
-        if !allowClipboardHistory {
-            item.setData(
-                Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
-            item.setData(
-                Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-        }
+        let item = transcriptPasteboardItem(text, allowClipboardHistory: allowClipboardHistory)
         let board = NSPasteboard.general
         board.clearContents()
         board.writeObjects([item])
