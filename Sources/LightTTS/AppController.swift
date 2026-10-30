@@ -348,7 +348,9 @@ import IOKit.ps
         guard state == "recording" else { return }
         LaunchTrace.mark("stop-enter")
 
-        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        let frontPID = frontApp?.processIdentifier
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE stop front bundle=%@ pid=%d", frontApp?.bundleIdentifier ?? "nil", frontPID ?? -1) }
         let stopFocusTask = Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }
         LaunchTrace.mark("recording-stopped")
         let rawSamples = testAudio ?? audio?.stop() ?? []
@@ -378,6 +380,7 @@ import IOKit.ps
                 LaunchTrace.mark("model-check-start")
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
                 LaunchTrace.mark("model-check-end")
+                if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE model selected=%@ loaded=%@ engine=%@", selected, loadedID, engine == nil ? "nil" : "ready") }
                 if loadedID != selected || engine == nil {
                     state = "loading"
                     warmSelected()
