@@ -4,7 +4,6 @@ import AppKit
 struct RecordingView: View {
     @ObservedObject var controller: AppController
     @ObservedObject private var level: RecordingLevel
-    @State private var hoveringError = false
     init(controller: AppController) { self.controller = controller; self.level = controller.recordingLevel }
 
     private var capsuleWidth: CGFloat {
@@ -56,12 +55,6 @@ struct RecordingView: View {
         }
         .contentShape(Capsule())
         .onTapGesture { if controller.state == "error" { controller.cancel() } }
-        .onHover { hoveringError = $0 }
-        .task(id: "\(controller.state):\(controller.message):\(hoveringError)") {
-            guard controller.state == "error", !hoveringError else { return }
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            if !Task.isCancelled && controller.state == "error" { controller.cancel() }
-        }
         .padding(.horizontal, isError ? 14 : 0)
         .padding(.vertical, isError ? 10 : 0)
         .frame(width: capsuleWidth, height: isError ? nil : (idle ? 8 : 32))

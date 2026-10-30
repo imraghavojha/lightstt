@@ -53,6 +53,9 @@ import IOKit.ps
     private let isTestAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
 
     private var panel: NSPanel?
+    private var panelDeadline: Task<Void, Never>?
+    var recordingPanelVisible: Bool { panel?.isVisible ?? false }
+    var recordingPanelTransparent: Bool { panel?.isOpaque == false && panel?.contentView?.layer?.isOpaque == false }
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
     private var sessionAutoPaste = true
@@ -171,12 +174,11 @@ import IOKit.ps
         }, Unmanaged.passUnretained(self).toOpaque())?.takeRetainedValue()
         if let powerSource { CFRunLoopAddSource(CFRunLoopGetMain(), powerSource, .defaultMode) }
         preparePanel()
-        if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == "idle", ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] == nil else { return }
                 if !self.onACPower && !self.keepModelLoaded && (self.engine != nil || self.warming != nil) { self.unloadEngine() }
-                if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
+                self.dismissPanel()
             }
         }
         NotificationCenter.default.addObserver(self, selector: #selector(shortcutsChanged), name: .shortcutsChanged, object: nil)
@@ -216,7 +218,8 @@ import IOKit.ps
         let onCrash: @Sendable () -> Void = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.warmingToken == token else { return }
-                self.fail("Speech engine exited unexpectedly. Try recording again.")
+                if self.state == "idle" || self.state == "error" { self.unloadEngine() }
+                else { self.fail("Speech engine exited unexpectedly. Try recording again.") }
             }
         }
         let languageID = model.fallbackID ?? model.id
@@ -232,7 +235,7 @@ import IOKit.ps
                 self.engine = resolved; self.loadedID = selected; self.warming = nil; self.warmingID = ""
                 if self.state == "idle" || self.state == "error" { self.scheduleEngineUnload() }
             }
-            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = ""; if !(error is CancellationError) { self.fail(error.localizedDescription) } }
+            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = ""; if !(error is CancellationError) && self.state != "idle" && self.state != "error" { self.fail(error.localizedDescription) } }
         }
     }
     func reloadSelectedModel() {
@@ -294,6 +297,7 @@ import IOKit.ps
         generation += 1; let current = generation
         LaunchTrace.mark("recording-start-request")
         state = "starting"
+        armPanelDeadline(seconds: 30, generation: current, message: "Recording could not start in time. Try again.")
         showPanel()
         warmSelected()
         sessionAutoPaste = UserDefaults.standard.object(forKey: "autoPaste") as? Bool ?? true
@@ -327,7 +331,7 @@ import IOKit.ps
                 let manageAudio = !isTestAudio || ProcessInfo.processInfo.environment["LIGHTTTS_TEST_VOLUME"] == "1"
                 try capture.start()
                 LaunchTrace.mark("capture-started")
-                audio = capture; started = Date(); state = "recording"; if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }; showPanel()
+                panelDeadline?.cancel(); audio = capture; started = Date(); state = "recording"; if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }; showPanel()
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == current, self.state == "recording" else { return }
                     if manageAudio { self.audioSettings.begin { [weak self] warning in Task { @MainActor in
@@ -359,6 +363,7 @@ import IOKit.ps
         LaunchTrace.mark("stop-setup-start")
         testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; runPendingHistoryReprocess(); if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
         LaunchTrace.mark("stop-setup-end")
+        armPanelDeadline(seconds: 330, generation: current, message: "Transcription timed out. Try recording again.")
         let usedPushToTalk = recordingUsesPushToTalk
         recordingUsesPushToTalk = false
         if let error = AudioProcessing.recordingError(samples: rawSamples, duration: elapsed, pushToTalk: usedPushToTalk) { fail(error); return }
@@ -437,7 +442,7 @@ import IOKit.ps
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
 
-                if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { hideImmediately() }
+                hideImmediately()
                 LaunchTrace.mark("text-inserted")
                 var item = HistoryEntry(text: text, date: recordingDate)
                 item.inputName = inputName; item.recordingDuration = recordDuration; item.modelName = model.name; item.processingDuration = Date().timeIntervalSince(processingStart); item.mode = "Voice to text"
@@ -450,6 +455,7 @@ import IOKit.ps
                     if written { item.audioFile = filename }
                     if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
                 }
+                panelDeadline?.cancel()
                 history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; copiedToClipboard = copied; if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { state = "idle"; scheduleEngineUnload() } else { state = "done" }; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
 
                 if state == "done" { try? await Task.sleep(nanoseconds: 150_000_000); if current == generation { hide() } }
@@ -457,7 +463,7 @@ import IOKit.ps
         }
     }
 
-    func cancel() { message = ""; audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; unloadEngine(); hide(); runPendingHistoryReprocess() }
+    func cancel() { panelDeadline?.cancel(); message = ""; audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; unloadEngine(); hide(); runPendingHistoryReprocess() }
 
     private func hideImmediately() {
         recordingLevel.value = 0; panel?.orderOut(nil)
@@ -467,10 +473,9 @@ import IOKit.ps
         state = "idle"; recordingLevel.value = 0
         if onACPower { warmSelected() }
         scheduleEngineUnload()
-        if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
-        else { panel?.orderOut(nil) }
+        panel?.orderOut(nil)
     }
-    func refreshRecordingWindow() { if state != "idle" || UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() } else { panel?.orderOut(nil) } }
+    func refreshRecordingWindow() { if state != "idle" { showPanel() } else { panel?.orderOut(nil) } }
     func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; recordingLevel.value = 0; showPanel() }
     private func dismissPanel() {
         panel?.orderOut(nil)
@@ -504,21 +509,39 @@ import IOKit.ps
         unloadTimer = timer
     }
     func fail(_ text: String) {
+        panelDeadline?.cancel()
         audioSettings.end()
         generation += 1; processing?.cancel(); processing = nil
         _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; recordingLevel.value = 0
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
         unloadEngine(); message = text; state = "error"; showPanel(); runPendingHistoryReprocess()
+        let current = generation
+        panelDeadline = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, let self, self.generation == current, self.state == "error" else { return }
+            self.cancel()
+        }
+    }
+    private func armPanelDeadline(seconds: UInt64, generation: Int, message: String) {
+        panelDeadline?.cancel()
+        panelDeadline = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            guard !Task.isCancelled, let self, self.generation == generation else { return }
+            self.fail(message)
+        }
     }
     private func preparePanel() {
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
             p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
-            p.contentView = NSHostingView(rootView: RecordingView(controller: self)); panel = p
+            let host = NSHostingView(rootView: RecordingView(controller: self))
+            host.wantsLayer = true; host.layer?.isOpaque = false; host.layer?.backgroundColor = NSColor.clear.cgColor
+            p.contentView = host; panel = p
             p.contentView?.layoutSubtreeIfNeeded()
         }
     }
     private func showPanel() {
+        guard state != "idle" else { panel?.orderOut(nil); return }
         if UserDefaults.standard.string(forKey: "recordingWindow") == "None", state != "error" { return }
         preparePanel()
         if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70));
