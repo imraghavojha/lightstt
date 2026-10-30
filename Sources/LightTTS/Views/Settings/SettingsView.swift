@@ -105,11 +105,11 @@ private struct SoundPageView: View {
             SettingsCard {
                 SettingsRow(title: "Sound effects", height: 54) { HStack(spacing: 0) { ForEach(["Simple", "Classic", "Off"], id: \.self) { value in Button { sound = value } label: { Text(value).font(.system(size: 12, weight: sound == value ? .semibold : .regular)).frame(width: value == "Classic" ? 62 : value == "Simple" ? 62 : 40, height: 24).foregroundStyle(sound == value ? (scheme == .dark ? Color.white : Color.black) : Color.secondary).background(sound == value ? (scheme == .dark ? Color(red: 91/255, green: 93/255, blue: 99/255) : Color.white) : Color.clear, in: RoundedRectangle(cornerRadius: 7)).overlay(RoundedRectangle(cornerRadius: 7).stroke(sound == value ? Color.primary.opacity(0.12) : .clear, lineWidth: 0.5)).shadow(color: sound == value ? .black.opacity(0.12) : .clear, radius: 1, y: 0.5) }.buttonStyle(.plain) } }.padding(2).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))) }
                 PageRule()
-                SettingsRow(title: "Volume", height: 42) { Button { playSound(start: true) } label: { Image(systemName: "speaker.fill") }.buttonStyle(.plain); SoundVolumeSlider(value: $volume, dark: scheme == .dark); Button { playSound(start: false) } label: { Image(systemName: "speaker.wave.2.fill") }.buttonStyle(.plain) }
+                SettingsRow(title: "Volume", height: 46) { Button { playSound(start: true) } label: { Image(systemName: "speaker.fill") }.buttonStyle(.plain); SoundVolumeSlider(value: $volume, dark: scheme == .dark); Button { playSound(start: false) } label: { Image(systemName: "speaker.wave.2.fill") }.buttonStyle(.plain) }
             }
-            Text("Recording").font(.system(size: 13, weight: .semibold)).padding(.top, 22).padding(.bottom, 8.5)
+            Text("Recording").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 8.5)
             SettingsCard {
-                SettingsRow(title: "Sound while recording") {
+                SettingsRow(title: "Sound while recording", height: 54) {
                     Menu {
                         ForEach(["Keep Playing", "Pause", "Mute", "Lower", "Muffle"], id: \.self) { value in Button(value == "Pause" ? "Pause (Unavailable)" : value) { recordingSound = value }.disabled(value == "Pause") }
                     } label: {
@@ -117,7 +117,7 @@ private struct SoundPageView: View {
                     }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause is unavailable and leaves playback unchanged; Muffle lowers volume if system audio capture is unavailable.")
                 }
                 PageRule()
-                HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.frame(minHeight: 48)
+                HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.frame(minHeight: 42)
             }
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.secondary) }
         }.padding(.horizontal, 24).padding(.top, 16) }.font(.system(size: 13))
