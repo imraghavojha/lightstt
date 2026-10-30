@@ -41,6 +41,18 @@ public final class ShortcutPreferences {
         defaults.object(forKey: key) as? Int ?? fallback
     }
 
+    // Match the representation that UserDefaults will return after saving.
+    func effectiveBinding(_ binding: ShortcutBinding) -> ShortcutBinding {
+        let input: ShortcutInput
+        switch binding.input {
+        case .keyboard(let code, let flags):
+            input = .keyboard(keyCode: code, modifiers: UInt64(Int(clamping: flags)))
+        case .mouse(let button):
+            input = .mouse(button: binding.enabled ? button : -1)
+        }
+        return ShortcutBinding(action: binding.action, input: input, enabled: binding.enabled)
+    }
+
     public func save(_ binding: ShortcutBinding) {
         switch (binding.action, binding.input) {
         case (.toggle, .keyboard(let code, let flags)),

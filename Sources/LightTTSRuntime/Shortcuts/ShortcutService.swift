@@ -56,8 +56,8 @@ public final class ShortcutService: ShortcutServicing {
     }
 
     public func beginEditing(_ action: ShortcutAction) {
-        update(editing: action, registration: .unavailable)
         monitor.stop()
+        update(editing: action, registration: .unavailable)
     }
 
     public func cancelEditing() {
@@ -69,7 +69,7 @@ public final class ShortcutService: ShortcutServicing {
         let wasEditing = snapshot.editing
         if wasEditing == nil { beginEditing(binding.action) }
         do {
-            try validate(binding)
+            try validate(preferences.effectiveBinding(binding))
             preferences.save(binding)
             cancelEditing()
         } catch {
@@ -92,6 +92,9 @@ public final class ShortcutService: ShortcutServicing {
     }
 
     private func validate(_ binding: ShortcutBinding) throws {
+        if !binding.enabled && (binding.action == .toggle || binding.action == .cancel) {
+            throw ShortcutError("This shortcut cannot be disabled")
+        }
         switch (binding.action, binding.input) {
         case (.mouse, .mouse(let button)) where !binding.enabled || button >= 0: break
         case (.toggle, .keyboard), (.pushToTalk, .keyboard), (.cancel, .keyboard): break

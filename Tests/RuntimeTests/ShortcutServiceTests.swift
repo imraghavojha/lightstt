@@ -10,13 +10,40 @@ private final class FakeShortcutMonitor: ShortcutMonitoring {
     var cancellation = false
     var validation: ShortcutValidation = .valid
     var result: ShortcutRegistrationResult = .installed
+    var releaseOnStop = false
+    var validated: [ShortcutBinding] = []
     func install(_ bindings: ShortcutBindings) -> ShortcutRegistrationResult {
         installs += 1
         return result
     }
-    func stop() { stops += 1 }
+    func stop() {
+        stops += 1
+        if releaseOnStop { onEvent?(.pushUp) }
+    }
     func setCancellationAvailable(_ available: Bool) { cancellation = available }
-    func validate(_ binding: ShortcutBinding) -> ShortcutValidation { validation }
+    func validate(_ binding: ShortcutBinding) -> ShortcutValidation {
+        validated.append(binding)
+        return validation
+    }
+}
+
+@MainActor
+private final class EditingRecording: RecordingControlling {
+    var snapshot = RecordingSnapshot(phase: .idle, sessionID: nil, startDate: nil, message: nil)
+    var stops = 0
+    func snapshots() -> AsyncStream<RecordingSnapshot> { AsyncStream { $0.finish() } }
+    func start(trigger: RecordingTrigger) {
+        snapshot = RecordingSnapshot(
+            phase: .recording, sessionID: SessionID(generation: 1), startDate: nil, message: nil)
+    }
+    func stop() {
+        stops += 1
+        snapshot = RecordingSnapshot(phase: .idle, sessionID: nil, startDate: nil, message: nil)
+    }
+    func cancel() {}
+    func dismissResult() {}
+    func beginShutdown() {}
+    func finishShutdown() async {}
 }
 
 final class ShortcutServiceTests: XCTestCase {
@@ -71,4 +98,64 @@ final class ShortcutServiceTests: XCTestCase {
         XCTAssertEqual(service.snapshot.editing, .pushToTalk)
         service.cancelEditing()
     }
+    @MainActor
+    func testEditingFinishesActivePushSession() throws {
+        let name = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let monitor = FakeShortcutMonitor()
+        let service = ShortcutService(
+            preferences: ShortcutPreferences(defaults: defaults), monitor: monitor)
+        let recording = EditingRecording()
+        let router = RecordingTriggerRouter(recording: recording, scheduler: ManualScheduler())
+        service.onEvent = { router.handle($0) }
+        XCTAssertTrue(service.install())
+        monitor.onEvent?(.pushDown)
+        XCTAssertEqual(recording.snapshot.phase, .recording)
+        monitor.releaseOnStop = true
+        service.beginEditing(.toggle)
+        XCTAssertEqual(recording.stops, 1)
+        XCTAssertEqual(recording.snapshot.phase, .idle)
+        service.cancelEditing()
+        XCTAssertNil(service.snapshot.editing)
+        XCTAssertEqual(recording.stops, 1)
+    }
+
+    @MainActor
+    func testRequiredBindingsRejectDisabledAndValidatePersistedValues() throws {
+        let name = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preferences = ShortcutPreferences(defaults: defaults)
+        let monitor = FakeShortcutMonitor()
+        let service = ShortcutService(preferences: preferences, monitor: monitor)
+        let original = preferences.bindings()
+        for action in [ShortcutAction.toggle, .cancel] {
+            let disabled = ShortcutBinding(
+                action: action, input: .keyboard(keyCode: 49, modifiers: 1 << 19), enabled: false)
+            XCTAssertThrowsError(try service.save(disabled)) { error in
+                XCTAssertEqual(
+                    error as? ShortcutError, ShortcutError("This shortcut cannot be disabled"))
+            }
+            XCTAssertEqual(preferences.bindings(), original)
+        }
+        XCTAssertTrue(monitor.validated.isEmpty)
+        let conflict = ShortcutBinding(
+            action: .cancel, input: .keyboard(keyCode: 49, modifiers: 1 << 19), enabled: true)
+        XCTAssertThrowsError(try service.save(conflict))
+        XCTAssertTrue(monitor.validated.isEmpty)
+        monitor.validation = .invalid("Unavailable")
+        let candidate = ShortcutBinding(
+            action: .cancel, input: .keyboard(keyCode: 42, modifiers: UInt64.max), enabled: true)
+        XCTAssertThrowsError(try service.save(candidate))
+        let effective = ShortcutBinding(
+            action: .cancel, input: .keyboard(keyCode: 42, modifiers: UInt64(Int.max)),
+            enabled: true)
+        XCTAssertEqual(monitor.validated, [effective])
+        XCTAssertEqual(preferences.bindings(), original)
+        monitor.validation = .valid
+        try service.save(candidate)
+        XCTAssertEqual(preferences.bindings().bindings.first { $0.action == .cancel }, effective)
+    }
+
 }
