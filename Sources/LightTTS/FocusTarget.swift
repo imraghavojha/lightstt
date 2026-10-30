@@ -37,6 +37,7 @@ final class FocusTarget: @unchecked Sendable {
         for down in [true, false] { let event = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: down); event?.flags = []; event?.post(tap: .cghidEventTap) }
     }
     func insert(_ text: String) throws {
+        try requireCurrentFocus()
         let result = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
         guard result == .success else { throw NSError(domain: "LightTTS.Accessibility", code: Int(result.rawValue), userInfo: [NSLocalizedDescriptionKey: "Could not insert into the focused field (Accessibility error \(result.rawValue))."]) }
     }

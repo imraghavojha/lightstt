@@ -6,7 +6,7 @@ import ServiceManagement
 
 private enum SettingsTab: String, CaseIterable {
     case sound = "Sound", models = "Models", library = "Library", configuration = "Configuration"
-    var icon: String { switch self { case .sound: "speaker.wave.2.fill"; case .models: "book"; case .library: "clock.arrow.circlepath"; case .configuration: "gearshape" } }
+    var icon: String { switch self { case .sound: "speaker.wave.2.fill"; case .models: "book.fill"; case .library: "clock.arrow.circlepath"; case .configuration: "gearshape" } }
 }
 
 struct SettingsView: View {
@@ -23,7 +23,7 @@ struct SettingsView: View {
                 ForEach(SettingsTab.allCases, id: \.rawValue) { tab in
                     Button { controller.selectSettings(tab.rawValue) } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white).frame(width: 20, height: 20).background(Color(white: 0.32).gradient, in: RoundedRectangle(cornerRadius: 5))
+                            Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white).frame(width: 20, height: 20).background(Color(white: 0.32).gradient, in: RoundedRectangle(cornerRadius: 5)).overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.5)).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
                             Text(tab.rawValue).font(.system(size: 13, weight: .medium))
                             Spacer()
                         }.padding(.horizontal, 8).frame(height: 35).background(controller.settingsSelection == tab.rawValue ? (dark ? Color.white.opacity(0.16) : Color.white.opacity(0.65)) : .clear, in: RoundedRectangle(cornerRadius: 10))
@@ -31,12 +31,12 @@ struct SettingsView: View {
                 }
                 Spacer()
                 Button(attached ? "Detach into window" : "Back to menu", action: detach).buttonStyle(.plain).foregroundStyle(.secondary).font(.system(size: 12)).padding(8)
-            }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 59/255, green: 62/255, blue: 69/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
+            }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 57/255, green: 62/255, blue: 71/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
             VStack(spacing: 0) {
                 HStack {
                     if controller.settingsSelection == "Library" {
-                        Button { if controller.selectedHistory != nil { controller.stopHistoryPlayback(); controller.selectedHistory = nil } else { controller.leaveLibrary() } } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain)
+                        Button { if controller.selectedHistory != nil { controller.stopHistoryPlayback(); controller.selectedHistory = nil } else { controller.leaveLibrary() } } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).offset(x: -4)
                     }
                     if let item = controller.selectedHistory, controller.settingsSelection == "Library" { Spacer(); Text(item.date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: "en_US")))).font(.system(size: 14, weight: .bold)); Spacer() }
                     else { Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer() }
@@ -46,7 +46,7 @@ struct SettingsView: View {
                             HStack(spacing: 6) { Image(systemName: "magnifyingglass"); TextField("Search history", text: $controller.historySearch).textFieldStyle(.plain); Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }.padding(.horizontal, 9).frame(width: 220, height: 28).background(Color.primary.opacity(0.09), in: Capsule())
                         } else { Button { controller.historySearchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).help("Search recordings") }
                     } else {
-                        Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).help("Select microphone")
+                        Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).offset(x: 6).help("Select microphone")
                     }
                 }.padding(.horizontal, 16).frame(height: 48)
                 switch controller.settingsSelection {
@@ -55,7 +55,7 @@ struct SettingsView: View {
                 case "Library": LibraryPageView(controller: controller)
                 default: ConfigurationPageView(controller: controller)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 44/255, green: 47/255, blue: 52/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 42/255, green: 47/255, blue: 52/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
         }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(white: 0.30)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
     }
 }
@@ -102,10 +102,10 @@ private struct SoundPageView: View {
             SettingsCard {
                 SettingsRow(title: "Sound while recording") {
                     Menu {
-                        ForEach(["Keep Playing", "Pause", "Mute", "Lower", "Muffle"], id: \.self) { value in Button(value) { recordingSound = value } }
+                        ForEach(["Keep Playing", "Pause", "Mute", "Lower", "Muffle"], id: \.self) { value in Button(value == "Pause" ? "Pause (Unavailable)" : value) { recordingSound = value }.disabled(value == "Pause") }
                     } label: {
-                        HStack(spacing: 8) { Image(systemName: recordingSound == "Pause" ? "pause.circle" : recordingSound == "Mute" ? "speaker.slash" : "speaker.wave.2"); Text(recordingSound); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }.padding(.horizontal, 9)
-                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause leaves playback unchanged when its state cannot be confirmed; Muffle lowers volume if system audio capture is unavailable.")
+                        HStack(spacing: 8) { Image(systemName: recordingSound == "Pause" ? "pause.circle" : recordingSound == "Mute" ? "speaker.slash" : "speaker.wave.2"); Text(recordingSound == "Pause" ? "Pause (Unavailable)" : recordingSound); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }.padding(.horizontal, 9)
+                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: recordingSound == "Pause" ? 180 : 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause is unavailable and leaves playback unchanged; Muffle lowers volume if system audio capture is unavailable.")
                 }
                 Divider()
                 HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.frame(minHeight: 48)

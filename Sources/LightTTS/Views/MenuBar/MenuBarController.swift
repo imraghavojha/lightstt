@@ -95,6 +95,11 @@ import LightTTSCore
             w.title = "LightTTS"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false; w.delegate = self; window = w
             updateContent(attached: false); w.setFrame(NSRect(x: 0, y: 0, width: 750, height: 508), display: false); w.center(); w.makeKeyAndOrderFront(nil)
+            DispatchQueue.main.async {
+                for (button, x) in [(NSWindow.ButtonType.closeButton, 20.0), (.miniaturizeButton, 43.0)] {
+                    w.standardWindowButton(button)?.setFrameOrigin(NSPoint(x: x, y: 3))
+                }
+            }
         }
         NSApp.activate(ignoringOtherApps: true)
     }

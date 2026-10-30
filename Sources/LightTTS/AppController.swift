@@ -44,6 +44,7 @@ import ServiceManagement
     private var testAudio: [Float]?
     private var defaultsObserver: NSObjectProtocol?
     private var pressed = false
+    private var shortcutOwnsRecording = false
     private var pushHeld = false
     private var pushOwnsRecording = false
     private var mouseStart: Date?
@@ -139,13 +140,16 @@ import ServiceManagement
         if down && !pressed {
             pressed = true
             if state == "error" { cancel() }
-            if UserDefaults.standard.bool(forKey: "pushToTalk") { start() }
+            if UserDefaults.standard.bool(forKey: "pushToTalk") { if state == "idle" { shortcutOwnsRecording = true; start() } }
             else if state == "starting" { cancel() }
             else if state == "recording" { stop() }
             else if state == "idle" { start() }
         } else if !down && pressed {
             pressed = false
-
+            if shortcutOwnsRecording {
+                shortcutOwnsRecording = false
+                if state == "starting" { cancel() } else if state == "recording" { stop() }
+            }
         }
     }
     private func handlePush(_ down: Bool) {
@@ -180,7 +184,7 @@ import ServiceManagement
         Task {
             if sessionAutoPaste {
                 let target = await Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }.value
-                guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
+                guard current == generation, state == "starting" else { return }
                 guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
                 focus = target
             }
@@ -243,7 +247,13 @@ import ServiceManagement
                 if sessionAutoPaste {
                     guard AXIsProcessTrusted() else { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary); throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
                     guard let target = focus else { throw SpeechError.audio("The focused field is unavailable.") }
-                    try await Task.detached(priority: .userInitiated) { try target.insert(text) }.value
+                    let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
+                    let send = UserDefaults.standard.bool(forKey: "sendOnShift")
+                    let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
+                    try await Task.detached(priority: .userInitiated) {
+                        try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
+                    }.value
+                    if shouldCopyTranscript(autoPaste: true, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
                 } else {
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 }
