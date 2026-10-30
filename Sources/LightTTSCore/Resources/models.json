@@ -1,0 +1,212 @@
+[
+  {
+    "id": "whisper-tiny",
+    "name": "Whisper tiny",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+  },
+  {
+    "id": "whisper-tiny-q5_1",
+    "name": "Whisper tiny-q5_1",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin"
+  },
+  {
+    "id": "whisper-tiny-q8_0",
+    "name": "Whisper tiny-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q8_0.bin"
+  },
+  {
+    "id": "whisper-tiny.en",
+    "name": "Whisper tiny.en",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+  },
+  {
+    "id": "whisper-tiny.en-q5_1",
+    "name": "Whisper tiny.en-q5_1",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin"
+  },
+  {
+    "id": "whisper-tiny.en-q8_0",
+    "name": "Whisper tiny.en-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q8_0.bin"
+  },
+  {
+    "id": "whisper-base",
+    "name": "Whisper base",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+  },
+  {
+    "id": "whisper-base-q5_1",
+    "name": "Whisper base-q5_1",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin"
+  },
+  {
+    "id": "whisper-base-q8_0",
+    "name": "Whisper base-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin"
+  },
+  {
+    "id": "whisper-base.en",
+    "name": "Whisper base.en",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+  },
+  {
+    "id": "whisper-base.en-q5_1",
+    "name": "Whisper base.en-q5_1",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin"
+  },
+  {
+    "id": "whisper-base.en-q8_0",
+    "name": "Whisper base.en-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q8_0.bin"
+  },
+  {
+    "id": "whisper-small",
+    "name": "Whisper small",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+  },
+  {
+    "id": "whisper-small-q5_1",
+    "name": "Whisper small-q5_1",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin"
+  },
+  {
+    "id": "whisper-small-q8_0",
+    "name": "Whisper small-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin"
+  },
+  {
+    "id": "whisper-small.en",
+    "name": "Whisper small.en",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin"
+  },
+  {
+    "id": "whisper-small.en-q5_1",
+    "name": "Whisper small.en-q5_1",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q5_1.bin"
+  },
+  {
+    "id": "whisper-small.en-q8_0",
+    "name": "Whisper small.en-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q8_0.bin"
+  },
+  {
+    "id": "whisper-medium",
+    "name": "Whisper medium",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
+  },
+  {
+    "id": "whisper-medium-q5_0",
+    "name": "Whisper medium-q5_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin"
+  },
+  {
+    "id": "whisper-medium-q8_0",
+    "name": "Whisper medium-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q8_0.bin"
+  },
+  {
+    "id": "whisper-medium.en",
+    "name": "Whisper medium.en",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin"
+  },
+  {
+    "id": "whisper-medium.en-q5_0",
+    "name": "Whisper medium.en-q5_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en-q5_0.bin"
+  },
+  {
+    "id": "whisper-medium.en-q8_0",
+    "name": "Whisper medium.en-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en-q8_0.bin"
+  },
+  {
+    "id": "whisper-large-v1",
+    "name": "Whisper large-v1",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v1.bin"
+  },
+  {
+    "id": "whisper-large-v2",
+    "name": "Whisper large-v2",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2.bin"
+  },
+  {
+    "id": "whisper-large-v2-q5_0",
+    "name": "Whisper large-v2-q5_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2-q5_0.bin"
+  },
+  {
+    "id": "whisper-large-v2-q8_0",
+    "name": "Whisper large-v2-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2-q8_0.bin"
+  },
+  {
+    "id": "whisper-large-v3",
+    "name": "Whisper large-v3",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+  },
+  {
+    "id": "whisper-large-v3-q5_0",
+    "name": "Whisper large-v3-q5_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin"
+  },
+  {
+    "id": "whisper-large-v3-turbo",
+    "name": "Whisper large-v3-turbo",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+  },
+  {
+    "id": "whisper-large-v3-turbo-q5_0",
+    "name": "Whisper large-v3-turbo-q5_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin"
+  },
+  {
+    "id": "whisper-large-v3-turbo-q8_0",
+    "name": "Whisper large-v3-turbo-q8_0",
+    "engine": "whisper",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
+  },
+  {
+    "id": "parakeet-v2",
+    "name": "Parakeet TDT 0.6B v2",
+    "engine": "parakeet",
+    "version": "v2"
+  },
+  {
+    "id": "parakeet-v3",
+    "name": "Parakeet TDT 0.6B v3",
+    "engine": "parakeet",
+    "version": "v3"
+  }
+]
