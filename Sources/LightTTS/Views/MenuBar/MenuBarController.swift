@@ -19,6 +19,14 @@ import LightTTSCore
         status.menu = menu
         popover.behavior = .transient
         updateContent(attached: true)
+        if ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let button = self.status.button else { return }
+                button.appearance = NSApp.appearance
+                NSApp.activate(ignoringOtherApps: true)
+                self.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: button)
+            }
+        }
     }
 
     private func makeStatusImage() -> NSImage {
@@ -45,11 +53,21 @@ import LightTTSCore
         add("History…", action: #selector(history))
         let settings = add("Settings…", action: #selector(settings), key: ","); settings.keyEquivalentModifierMask = .command
         menu.addItem(.separator())
-        let device = AVCaptureDevice.default(for: .audio)?.localizedName ?? "Microphone"
-        let input = add("\(device) (Default)", action: nil)
+        let selectedInput = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
+        let devices = InputDevice.available
+        let defaultName = AVCaptureDevice.default(for: .audio)?.localizedName ?? "Microphone"
+        let deviceName = devices.first(where: { $0.id == selectedInput })?.name ?? "\(defaultName) (Default)"
+        let input = add(deviceName, action: nil)
         let inputs = NSMenu()
-        let defaultInput = NSMenuItem(title: "System Default", action: nil, keyEquivalent: "")
-        defaultInput.state = .on; defaultInput.isEnabled = false; inputs.addItem(defaultInput)
+        let defaultInput = NSMenuItem(title: "System Default (\(defaultName))", action: #selector(selectInput(_:)), keyEquivalent: "")
+        defaultInput.target = self; defaultInput.representedObject = ""; defaultInput.state = selectedInput.isEmpty ? .on : .off
+        inputs.addItem(defaultInput)
+        inputs.addItem(.separator())
+        for device in devices {
+            let item = NSMenuItem(title: device.name, action: #selector(selectInput(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = device.id; item.state = selectedInput == device.id ? .on : .off
+            inputs.addItem(item)
+        }
         input.submenu = inputs
         let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
         let modelItem = add("Voice to text", action: nil)
@@ -70,6 +88,7 @@ import LightTTSCore
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item); return item
     }
     @objc private func toggleRecording() { if app.state == "recording" { app.stop() } else if app.state == "idle" { app.start() } }
+    @objc private func selectInput(_ sender: NSMenuItem) { guard let id = sender.representedObject as? String else { return }; UserDefaults.standard.set(id, forKey: "inputDeviceUID") }
     @objc private func selectModel(_ sender: NSMenuItem) { guard let id = sender.representedObject as? String else { return }; UserDefaults.standard.set(id, forKey: "selectedModel"); app.warmSelected() }
     @objc private func history() { showSettings("Library") }
     @objc private func settings() { showSettings(nil) }

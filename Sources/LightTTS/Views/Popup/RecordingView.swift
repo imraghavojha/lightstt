@@ -12,7 +12,7 @@ struct RecordingView: View {
                         .frame(width: 2, height: max(2, 2 + CGFloat(controller.level) * [6, 10, 14, 14, 10, 6][index]))
                 }
             } else if controller.state == "processing" {
-                ProgressView().controlSize(.mini).tint(.white)
+                ProgressView().controlSize(.mini).environment(\.colorScheme, .dark)
             } else if controller.state == "done" {
                 Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
             } else if controller.state == "error" {

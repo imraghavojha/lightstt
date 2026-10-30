@@ -8,6 +8,7 @@ final class AudioCapture {
     private let onLevel: (Float) -> Void
     init(onLevel: @escaping (Float) -> Void) { self.onLevel = onLevel }
     func start() throws {
+        try InputDevice.applySelection(to: engine)
         let node = engine.inputNode; let format = node.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0, let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false), let converter = AVAudioConverter(from: format, to: target) else { throw SpeechError.audio("No microphone input available") }
         node.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in

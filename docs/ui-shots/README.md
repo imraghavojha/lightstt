@@ -1,0 +1,7 @@
+# UI captures
+
+`ref-*` files are crops from the supplied local Superwhisper study. The study did not capture processing, completion, error, cancellation, or a light menu, so no reference for those states is included.
+
+`popup-*` captures are from the built LightTTS application with `LIGHTTTS_UI_SHOT_STATE` selecting a deterministic state and `LIGHTTTS_UI_SHOT_APPEARANCE` selecting the appearance. The recording capture uses zero level to match the quiet reference; live audio drives the waveform in normal operation. Cancellation closes the panel when Always Show is off, so there is no visible popup to crop. The test mode does not start the microphone or shortcut monitor.
+
+`menubar-*` uses `LIGHTTTS_UI_SHOT_MENU=1` to open the real native menu for capture. The light capture has no corresponding local reference. These captures verify appearance only; microphone input selection is exercised separately with Core Audio device readback.
