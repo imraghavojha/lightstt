@@ -98,10 +98,8 @@ import LightTTSCore
             DispatchQueue.main.async {
                 for (button, x) in [(NSWindow.ButtonType.closeButton, 20.0), (.miniaturizeButton, 43.0)] {
                     if let control = w.standardWindowButton(button) {
-                        control.controlSize = .large
-                        control.sizeToFit()
                         let shift = control.superview?.isFlipped == true ? 5.0 : -5.0
-                        control.setFrameOrigin(NSPoint(x: x - (control.frame.width - 12) / 2, y: 3 + shift - (control.frame.height - 12) / 2))
+                        control.setFrameOrigin(NSPoint(x: x, y: 3 + shift))
                     }
                 }
             }
