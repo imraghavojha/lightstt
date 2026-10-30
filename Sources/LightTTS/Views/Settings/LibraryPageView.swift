@@ -54,7 +54,7 @@ struct LibraryPageView: View {
                                 recording(item)
                             }
                         }
-                    }.padding(.leading, 24).padding(.trailing, 33).padding(.top, 16).padding(.bottom, 20)
+                    }.padding(.leading, 24).padding(.trailing, 33).padding(.top, 20).padding(.bottom, 20)
                 }.id(controller.historySearch)
             }
     }
