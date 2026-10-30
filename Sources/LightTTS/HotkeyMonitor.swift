@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import AVFoundation
 
 /// An active session event tap consumes the shortcut before it reaches the focused app.
 @MainActor final class HotkeyMonitor {
@@ -11,7 +12,7 @@ import ApplicationServices
     func install() -> Bool {
         stop()
         let accessibility = AXIsProcessTrusted(), input = CGPreflightListenEventAccess()
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS test: accessibility=\(accessibility) input=\(input)\n", stderr) }
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS test: accessibility=\(accessibility) input=\(input) microphone=\(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)\n", stderr) }
         guard accessibility, input else { return false }
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
         let callback: CGEventTapCallBack = { _, type, event, info in
@@ -45,5 +46,5 @@ import ApplicationServices
         guard activeKey else { return false }
         activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) }; return true
     }
-    func stop() { if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; source = nil; tap = nil; activeKey = false }
+    func stop() { if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; source = nil; tap = nil; if activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } } }
 }
