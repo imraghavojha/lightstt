@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Speech
 import FluidAudio
 import LightTTSCore
@@ -6,6 +7,7 @@ import LightTTSInference
 
 @main struct Helper {
     static func main() async {
+        guard dup2(STDERR_FILENO, STDOUT_FILENO) >= 0 else { exit(1) }
         if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "download" {
             do { _ = try await AsrModels.download(to: URL(fileURLWithPath: CommandLine.arguments[2]), version: CommandLine.arguments[3] == "v2" ? .v2 : .v3); return }
             catch { fputs("\(error)\n", stderr); exit(1) }
@@ -29,11 +31,15 @@ import LightTTSInference
                 return
             } catch { fputs("\(error)\n", stderr); exit(1) }
         }
+        guard let value = ProcessInfo.processInfo.environment["LIGHTTTS_REPLY_FD"], let fd = Int32(value), fd > 2 else {
+            fputs("Missing helper reply descriptor\n", stderr); exit(1)
+        }
+        let replyChannel = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
         var engine: (any TranscriptionEngine)?
         while let line = readLine(), let data = line.data(using: .utf8) {
             guard let command = try? JSONDecoder().decode(Command.self, from: data) else { continue }
             trace("helper-received-\(command.action)")
-            var response = Reply(text: nil, error: nil)
+            var response = Reply(id: command.id, text: nil, error: nil)
             do {
                 switch command.action {
                 case "warm":
@@ -61,8 +67,7 @@ import LightTTSInference
                 }
             } catch { response.error = error.localizedDescription }
             if let result = try? JSONEncoder().encode(response) {
-                if let reply = command.reply { try? result.write(to: URL(fileURLWithPath: reply), options: .atomic) }
-                else { try? FileHandle.standardOutput.write(contentsOf: result + Data([10])) }
+                try? replyChannel.write(contentsOf: result + Data([10]))
             }
         }
     }
@@ -70,5 +75,5 @@ import LightTTSInference
 func trace(_ stage: String) {
     if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { fputs("LightTTS trace: \(stage) mach=\(mach_absolute_time())\n", stderr) }
 }
-struct Command: Codable { let action: String; let reply: String?; var model: Model?; var audio: String?; var language: String? }
-struct Reply: Codable { var text: String?; var error: String? }
+struct Command: Codable { let id: String; let action: String; var model: Model?; var audio: String?; var language: String? }
+struct Reply: Codable { let id: String; var text: String?; var error: String? }

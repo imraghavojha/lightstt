@@ -25,15 +25,20 @@ with tempfile.TemporaryDirectory(prefix='lighttts-transcription-') as temp:
     root = pathlib.Path(temp)
     audio = root / 'audio.pcm'
     audio.write_bytes(struct.pack('<' + 'f' * len(samples), *(s / 32768 for s in samples)))
-    with subprocess.Popen([helper], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True) as process:
+    read_fd, write_fd = os.pipe()
+    env = dict(os.environ, LIGHTTTS_REPLY_FD=str(write_fd))
+    with os.fdopen(read_fd) as replies, subprocess.Popen([helper], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=(write_fd,), env=env, text=True) as process:
+        os.close(write_fd)
         def request(command):
+            command['id'] = str(time.monotonic_ns())
             process.stdin.write(json.dumps(command) + '\n')
             process.stdin.flush()
-            if not select.select([process.stdout], [], [], 120)[0]:
+            if not select.select([replies], [], [], 120)[0]:
                 raise RuntimeError('Helper timed out')
-            line = process.stdout.readline()
+            line = replies.readline()
             if not line: raise RuntimeError('Helper exited')
             result = json.loads(line)
+            assert result['id'] == command['id']
             if result.get('error'): raise RuntimeError(result['error'])
             return result
         request(dict(action='warm', model=dict(id='whisper-tiny.en', name='Whisper Tiny EN', engine='whisper')))

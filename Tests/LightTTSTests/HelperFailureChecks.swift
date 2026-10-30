@@ -39,11 +39,38 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         defaults.set(-1, forKey: "mouseShortcut")
         NotificationCenter.default.post(name: .shortcutsChanged, object: nil)
         precondition(toggle.title.contains("Space") && push.title == "Record shortcut" && mouse.title == "Record shortcut", "shortcut labels must refresh immediately")
-        let replyScript = try script(#"while IFS= read -r line; do printf '%s\n' '{"text":"ok"}'; done"#)
+        let replyScript = try script(#"""
+        exec /usr/bin/python3 -c '
+        import json, os, sys, time
+        out = os.fdopen(int(os.environ["LIGHTTTS_REPLY_FD"]), "wb", buffering=0)
+        for line in sys.stdin:
+            command = json.loads(line)
+            action = command["action"]
+            os.write(1, b"log before\n{}\n")
+            if action == "invalid":
+                out.write(b"\xff\n")
+            elif action == "oversized":
+                out.write(b"x" * (17 * 1024 * 1024) + b"\n")
+            else:
+                out.write(b"{}\n" + json.dumps({"id":"unknown", "text":"stale"}).encode() + b"\n")
+                reply = json.dumps({"id": command["id"], "text": "a" * (2 * 1024 * 1024) if action == "large" else "ok"}).encode() + b"\n"
+                out.write(reply[:7]); os.write(1, b"interleaved log\n"); out.write(reply[7:] + json.dumps({"id": "after", "text": "stale"}).encode() + b"\n")
+                os.write(1, b"log after without newline")
+        '
+        """#)
         defer { try? FileManager.default.removeItem(at: replyScript) }
-        let responsive = try HelperEngine(executableURL: replyScript, warmTimeout: 1)
-        let response = try await responsive.request(action: "warm")
-        precondition(response == "ok", "pipe reply should be decoded")
+        let responsive = try HelperEngine(executableURL: replyScript, warmTimeout: 10, transcribeTimeout: 10)
+        let firstResponse = try await responsive.request(action: "warm")
+        precondition(firstResponse == "ok")
+        let largeResponse = try await responsive.request(action: "large")
+        precondition(largeResponse?.count == 2 * 1024 * 1024)
+        for action in ["invalid", "oversized"] {
+            do { _ = try await responsive.request(action: action); fatalError("expected protocol error") }
+            catch { precondition(error.localizedDescription.contains(action == "invalid" ? "UTF-8" : "too large")) }
+            precondition(responsive.isRunning, "bad frame should not kill the helper")
+            let recovered = try await responsive.request(action: "warm")
+            precondition(recovered == "ok", "reader must recover after bad frame")
+        }
         responsive.terminate()
         let exitScript = try script("read line\nexit 1")
         defer { try? FileManager.default.removeItem(at: exitScript) }

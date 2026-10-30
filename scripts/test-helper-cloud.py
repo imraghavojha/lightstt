@@ -24,15 +24,21 @@ with tempfile.TemporaryDirectory(prefix='lighttts-cloud-test-') as temp:
     audio = root / 'audio.pcm'
     audio.write_bytes(struct.pack('<' + 'f' * len(samples), *(s / 32768 for s in samples)))
     env = dict(os.environ, LIGHTTTS_MOCK_CLOUD='1')
-    with subprocess.Popen([helper], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True) as process:
+    read_fd, write_fd = os.pipe()
+    env["LIGHTTTS_REPLY_FD"] = str(write_fd)
+    with os.fdopen(read_fd) as replies, subprocess.Popen([helper], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, pass_fds=(write_fd,), env=env, text=True) as process:
+        os.close(write_fd)
         def request(command):
+            command['id'] = str(time.monotonic_ns())
             process.stdin.write(json.dumps(command) + '\n')
             process.stdin.flush()
-            if not select.select([process.stdout], [], [], 60)[0]:
+            if not select.select([replies], [], [], 60)[0]:
                 raise RuntimeError('Helper timed out')
-            line = process.stdout.readline()
+            line = replies.readline()
             if not line: raise RuntimeError('Helper exited')
-            return json.loads(line)
+            result = json.loads(line)
+            assert result['id'] == command['id']
+            return result
         for provider, name in [('groq', 'whisper-large-v3'), ('gemini', 'gemini-3.8-flash'), ('elevenlabs', 'scribe_v2'), ('compatible', 'example-model')]:
             model = dict(id='mock-' + provider, name='mock', engine='cloud', cloudProvider=provider, cloudModel=name)
             if provider == 'compatible': model['cloudEndpoint'] = 'https://example.invalid/v1'
