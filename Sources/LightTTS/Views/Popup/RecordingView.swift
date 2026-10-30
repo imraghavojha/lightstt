@@ -88,6 +88,7 @@ private struct PanelSizer: NSViewRepresentable {
             var frame = window.frame
             frame.origin.x += (frame.width - panelWidth) / 2
             frame.size.width = panelWidth
+            if let visible = (window.screen ?? NSScreen.main)?.visibleFrame { frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width) }
             window.setFrame(frame, display: true, animate: false)
         }
     }
