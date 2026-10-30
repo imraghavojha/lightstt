@@ -163,21 +163,26 @@ struct LibraryPageView: View {
                     Button("Open file location") { controller.revealHistory(item) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.blue, in: RoundedRectangle(cornerRadius: 7)).foregroundStyle(.white)
                 }.buttonStyle(.plain).font(.system(size: 11))
             }.padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 16)
-        }.frame(maxHeight: .infinity).background(scheme == .dark ? Color(red: 44/255, green: 47/255, blue: 52/255) : Color(white: 0.95)).shadow(color: .black.opacity(0.2), radius: 8, x: -3)
+        }.frame(maxHeight: .infinity).background(drawerBackground).compositingGroup().shadow(color: .black.opacity(0.12), radius: 8, x: -3)
+    }
+    private var drawerBackground: LinearGradient {
+        LinearGradient(colors: scheme == .dark
+            ? [Color(red: 49/255, green: 53/255, blue: 62/255), Color(red: 35/255, green: 41/255, blue: 53/255)]
+            : [Color(red: 227/255, green: 230/255, blue: 236/255), Color(red: 230/255, green: 234/255, blue: 240/255)], startPoint: .top, endPoint: .bottom)
     }
     private func metadataRow(_ icon: String, _ title: String, _ value: String, _ color: Color) -> some View {
         HStack(spacing: 8) {
             if icon == "provider" { providerBadge }
             else { Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.white).frame(width: 20, height: 20).background(color, in: RoundedRectangle(cornerRadius: 5)) }
-            Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.caption).foregroundStyle(.secondary)
+            Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.system(size: 13)).foregroundStyle(.primary)
         }.font(.system(size: 12))
     }
     private var providerBadge: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.15))
-            ForEach(0..<3) { index in
-                RoundedRectangle(cornerRadius: 4).stroke(Color.white, lineWidth: 0.8)
-                    .frame(width: 7, height: 13).rotationEffect(.degrees(Double(index) * 60))
+            ForEach(0..<6) { index in
+                RoundedRectangle(cornerRadius: 3).trim(from: 0.04, to: 0.82).stroke(Color.white, style: StrokeStyle(lineWidth: 0.75, lineCap: .round))
+                    .frame(width: 6, height: 10).offset(y: -2).rotationEffect(.degrees(Double(index) * 60))
             }
         }.frame(width: 20, height: 20)
     }
