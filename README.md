@@ -1,21 +1,32 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
-
 # LightTTS
 
-A local macOS menu-bar speech-to-text app for Apple Silicon and macOS 14+. Build with Swift and the Xcode command-line tools:
+LightTTS is a macOS menu-bar speech-to-text app. It records speech, transcribes it locally or through a cloud provider, and inserts text into the focused app.
+
+Features include configurable shortcuts and push-to-talk, audio input and output settings, a transcription library, model downloads and imports, and an optional local fallback for cloud transcription.
+
+Requires Apple Silicon, macOS 14.2 or later, Swift 6, and Xcode command-line tools.
 
 ```sh
 scripts/setup-signing.sh
 scripts/build-app.sh
-scripts/run.sh
+open ~/Applications/LightTTS.app
 ```
 
-Grant Microphone, Accessibility and Input Monitoring permissions, download a model in Models, then press Option-Space to start and stop dictation. Settings include push-to-talk and Right Option. The transcription is inserted into the previously focused field using Accessibility. If the field does not support text insertion, LightTTS reports an error and leaves the clipboard unchanged. The WAV harness is `swift run lighttts-cli whisper MODEL_FILE AUDIO_FILE` or `swift run lighttts-cli parakeet-v2 MODEL_DIRECTORY AUDIO_FILE` (also `parakeet-v3`). Model data is local to your Mac; downloads come from the model providers. See [catalog schema](docs/models-schema.md) and [performance notes](docs/perf.md).
+Grant Microphone, Accessibility, and Input Monitoring permissions when prompted. The default shortcut is Option-Space. Apple Speech may require a system asset download and macOS 26 or later.
 
-This is an in-progress implementation. A debug test harness can exercise hotkey, recording and insertion using a WAV fixture; live speaker-to-microphone capture has also been checked on the development Mac. Downloads show progress and support cancellation and resume. The package currently uses Swift 5 language mode with a Swift 6 toolchain. See the pull request for verification and remaining work.
+Local engines include Whisper, Parakeet, Canary, sherpa-onnx models, and Apple Speech. Cloud options include Groq, Gemini, ElevenLabs, and OpenAI-compatible endpoints. Cloud audio is sent to the selected provider; API keys are stored in Keychain. See the [model catalog schema](docs/models-schema.md).
 
-For development, set `LIGHTTTS_BUILD_CONFIGURATION=debug` when running the build script. A debug app launched with `LIGHTTTS_TEST_WAV` pointing to a 16 kHz speech WAV and `LIGHTTTS_TEST_MODEL` set to a catalog ID can be driven using `swift scripts/test-trigger.swift <pid> hid` twice; `toggle` exercises the same handler without a synthetic key. The debug test script activates TextEdit. These notification triggers and WAV substitution are excluded from release builds.
+The SwiftUI menu-bar app handles recording, settings, and text insertion. A separate helper process runs inference; LightTTSCore handles model storage and downloads. The CLI provides model and transcription commands.
 
-Run `scripts/setup-signing.sh` once to create the dedicated local development signing keychain. Builds use its identity and update `~/Applications/LightTTS.app` in place; the certificate and bundle identifier define a stable code requirement. The keychain uses a known local password and is intended only for development. Newly created keys are non-exportable and restricted to codesign; existing identities are left unchanged and may retain broader access.
+## Performance
 
-Set `LIGHTTTS_TEST_AUDIO` to a WAV file to run a paced, permission-free transcription test: microphone input, global monitors, media controls, sound cues, and pasting are bypassed. Set `LIGHTTTS_TEST_PASTE=1` to exercise text insertion into the focused application. Post the distributed notification `com.lighttts.test.toggle.<bundle identifier>` to start or stop this test. Normal use requests missing microphone, Accessibility and Input Monitoring permissions during its first onboarding pass; previously granted permissions are not requested again.
+Measured on an Apple M1 Max with 64 GB RAM; see [method](docs/perf.md).
+
+| Metric | LightTTS | SuperWhisper |
+| --- | --- | --- |
+| Physical footprint after 2 min idle | 13 MB | N/A: three interrupted attempts |
+| Idle CPU, energy impact, wakeups/s (60 s mean) | 0.0%, 0.0, 0.0 | N/A: three interrupted attempts |
+| Launch to menu-bar item | 199 ms | N/A: item timing not observed |
+| Stop to paste | 140 ms; expected text observed | N/A: transcription not established unattended |
+| Peak footprint during transcription | N/A: 156 MB app + helper observed around completion | N/A |
+| Footprint 2.5 min after transcription | 18 MB; helper exited | N/A |

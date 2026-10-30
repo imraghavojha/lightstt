@@ -62,7 +62,6 @@ enum AudioProcessing {
     }
 }
 
-/// One-pole stereo low-pass used by the system audio tap.
 struct StereoLowPass {
     private var alpha: Float = 0.1
     private var left: Float = 0

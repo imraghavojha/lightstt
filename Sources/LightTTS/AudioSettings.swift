@@ -4,7 +4,6 @@ import AudioToolbox
 import CoreAudioTapKit
 import IOKit.hidsystem
 
-/// Applies input and output settings for the lifetime of one recording.
 final class AudioSettings {
     private var output: AudioDeviceID = 0
     private var previousVolume: Float32?
