@@ -11,7 +11,7 @@ import Darwin
 
 
 @MainActor final class AppController: NSObject, ObservableObject {
-    @Published var state = "idle"
+    @Published var state = "idle" { didSet { hotkey.setRecording(state == "starting" || state == "recording") } }
     @Published var settingsSelection = "Sound"
     private var previousSettingsSelection = "Sound"
     @Published var level: Float = 0
@@ -163,6 +163,8 @@ import Darwin
                 if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
             }
         }
+        NotificationCenter.default.addObserver(self, selector: #selector(shortcutsChanged), name: .shortcutsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(shortcutCaptureChanged), name: .shortcutCaptureChanged, object: nil)
         if UserDefaults.standard.bool(forKey: "autoCheckUpdates") && !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") { checkUpdates(interactive: false) }
         if let index = CommandLine.arguments.firstIndex(of: "--settings-page"), CommandLine.arguments.indices.contains(index + 1) { settingsSelection = CommandLine.arguments[index + 1] }
         if isTestAudio { DistributedNotificationCenter.default().addObserver(self, selector: #selector(testAudioToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(Bundle.main.bundleIdentifier ?? "app")"), object: nil) }
@@ -171,6 +173,8 @@ import Darwin
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testHIDShortcut(_:)), name: Notification.Name("com.lighttts.test.hid.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
         #endif
     }
+    @objc private func shortcutsChanged() { if !ShortcutButton.isRecording && !MouseShortcutButton.isRecording { installHotkey() } }
+    @objc private func shortcutCaptureChanged() { if ShortcutButton.isRecording || MouseShortcutButton.isRecording { hotkey.stop() } else { installHotkey() } }
     @objc private func testAudioToggle(_ notification: Notification) { if state == "recording" { stop() } else if state == "idle" { start() } }
     #if DEBUG
     func testURLToggle() { handleShortcut(true); handleShortcut(false) }
@@ -217,18 +221,18 @@ import Darwin
         engine = nil; loadedID = ""
     }
     @discardableResult func installHotkey() -> Bool {
-        guard !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") else { return false }
+        guard !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") && !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return false }
         hotkey.onShortcut = { [weak self] down in self?.handleShortcut(down) }
         hotkey.onPush = { [weak self] down in self?.handlePush(down) }
         hotkey.onMouse = { [weak self] down in self?.handleMouse(down) }
         hotkey.onEscape = { [weak self] in if self?.state != "idle" { self?.cancel() } }
         let installed = hotkey.install()
-        if !installed { message = "Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut." }
+        if hotkey.registrationFailed { message = "A shortcut is unavailable. Choose another in Configuration → Keyboard Shortcuts." }
+        else if message.contains("shortcut") || message.contains("Accessibility") { message = "" }
         return installed
     }
     func requestPermissions() {
         _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
-        _ = CGRequestListenEventAccess()
         installHotkey()
     }
     func handleShortcut(_ down: Bool) {
@@ -283,10 +287,9 @@ import Darwin
         }
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         Task {
-            if sessionAutoPaste {
+            if sessionAutoPaste && AXIsProcessTrusted() {
                 let target = await Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }.value
                 guard current == generation, state == "starting" else { return }
-                guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
                 focus = target
             }
             if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
@@ -358,17 +361,22 @@ import Darwin
                     try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
                     return
                 }
+                var pasteWarning: String?
                 if sessionAutoPaste {
-                    guard AXIsProcessTrusted() else { if !isTestAudio { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }; throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
-                    guard let target = focus else { throw SpeechError.audio("The focused field is unavailable.") }
-                    let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
-                    let send = UserDefaults.standard.bool(forKey: "sendOnShift")
-                    let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
-                    try await Task.detached(priority: .userInitiated) {
-                        try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
-                    }.value
-                    if shouldCopyTranscript(autoPaste: true, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
-                } else {
+                    if !AXIsProcessTrusted() {
+                        pasteWarning = "Grant Accessibility to auto-paste. The transcription was copied to the clipboard."
+                    } else if let target = focus {
+                        let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
+                        let send = UserDefaults.standard.bool(forKey: "sendOnShift")
+                        let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
+                        do {
+                            try await Task.detached(priority: .userInitiated) {
+                                try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
+                            }.value
+                        } catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
+                    } else { pasteWarning = "The focused field is unavailable. The transcription was copied to the clipboard." }
+                }
+                if pasteWarning != nil || shouldCopyTranscript(autoPaste: sessionAutoPaste, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) {
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
@@ -385,7 +393,7 @@ import Darwin
                     if written { item.audioFile = filename }
                     if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
                 }
-                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
+                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; state = "done"; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }
