@@ -135,24 +135,37 @@ struct LibraryPageView: View {
                 action("chevron.left", "Close information") { state.drawer = false }
                 Spacer(); Text(item.date.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 13, weight: .bold)); Spacer()
                 Color.clear.frame(width: 24, height: 24)
-            }.padding(.horizontal, 12).frame(height: 48)
+            }.padding(.horizontal, 12).frame(height: 44)
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
             VStack(spacing: 12) {
-                HStack { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").fontWeight(.bold); Spacer(); Text("LightTTS").font(.caption).foregroundStyle(.secondary) }.padding(14).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
+                HStack { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").fontWeight(.bold); Spacer(); providerBadge }.padding(.horizontal, 14).frame(height: 49).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
                 VStack(spacing: 12) {
-                    metadataRow("mic.fill", item.inputName ?? "Not available", item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—", .pink)
-                    metadataRow("waveform", item.modelName ?? "Not available", item.processingDuration.map { String(format: "%.0f ms", $0 * 1000) } ?? "—", .purple)
+                    metadataRow("headphones", item.inputName ?? "Not available", item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—", .pink)
+                    metadataRow("provider", item.modelName ?? "Not available", item.processingDuration.map { String(format: "%.0f ms", $0 * 1000) } ?? "—", .purple)
                 }.padding(14).background(cardColor, in: RoundedRectangle(cornerRadius: 14))
                 Spacer()
                 HStack(spacing: 8) {
                     Button("Report issue") { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/issues/new")!) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
                     Button("Open file location") { controller.revealHistory(item) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.blue, in: RoundedRectangle(cornerRadius: 7)).foregroundStyle(.white)
                 }.buttonStyle(.plain).font(.system(size: 11))
-            }.padding(16)
+            }.padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 16)
         }.frame(maxHeight: .infinity).background(scheme == .dark ? Color(red: 44/255, green: 47/255, blue: 52/255) : Color(white: 0.95)).shadow(color: .black.opacity(0.2), radius: 8, x: -3)
     }
     private func metadataRow(_ icon: String, _ title: String, _ value: String, _ color: Color) -> some View {
-        HStack(spacing: 8) { Image(systemName: icon).foregroundStyle(.white).frame(width: 26, height: 26).background(color, in: RoundedRectangle(cornerRadius: 6)); Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.caption).foregroundStyle(.secondary) }.font(.system(size: 12))
+        HStack(spacing: 8) {
+            if icon == "provider" { providerBadge }
+            else { Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.white).frame(width: 20, height: 20).background(color, in: RoundedRectangle(cornerRadius: 5)) }
+            Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.caption).foregroundStyle(.secondary)
+        }.font(.system(size: 12))
+    }
+    private var providerBadge: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.15))
+            ForEach(0..<3) { index in
+                RoundedRectangle(cornerRadius: 4).stroke(Color.white, lineWidth: 0.8)
+                    .frame(width: 7, height: 13).rotationEffect(.degrees(Double(index) * 60))
+            }
+        }.frame(width: 20, height: 20)
     }
     private func duration(_ value: Double) -> String { let seconds = max(0, Int(value)); return String(format: "%d:%02d", seconds / 60, seconds % 60) }
     private func copy(_ item: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(item.text, forType: .string) }
