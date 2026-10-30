@@ -43,8 +43,7 @@ struct CompactMenuView: View {
                 Divider().padding(.horizontal, 14).padding(.vertical, 4)
             }
             HStack(spacing: 8) {
-                Text("Model")
-                Spacer(minLength: 4)
+                Text("Model").frame(width: 100, alignment: .leading)
                 Menu {
                     if data.installedModels.isEmpty { Button("Open Models settings…") { controller.settingsSelection = "Models"; openSettings() } }
                     ForEach(data.installedModels) { model in
@@ -53,14 +52,15 @@ struct CompactMenuView: View {
                             else { Text(model.name) }
                         }
                     }
-                } label: { Text(modelName).lineLimit(1) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                } label: { Color.clear.frame(width: 136, height: 28) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 136)
+                .overlay(alignment: .leading) { Text(modelName).lineLimit(1).truncationMode(.middle).frame(width: 136, alignment: .leading).allowsHitTesting(false) }
+                .accessibilityLabel("Model: \(modelName)").help(modelName)
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
             }.padding(.horizontal, 14).frame(height: 34)
 
             HStack(spacing: 8) {
-                Text("Microphone")
-                Spacer(minLength: 4)
+                Text("Microphone").frame(width: 100, alignment: .leading)
                 Menu {
                     Button { selectedInput = "" } label: {
                         if selectedInput.isEmpty { Label("\(data.defaultName) (Default)", systemImage: "checkmark") }
@@ -72,8 +72,10 @@ struct CompactMenuView: View {
                             else { Text(device.name) }
                         }
                     }
-                } label: { Text(inputName).lineLimit(1).truncationMode(.middle) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).help(inputName)
+                } label: { Color.clear.frame(width: 136, height: 28) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 136)
+                .overlay(alignment: .leading) { Text(selectedInput.isEmpty ? data.defaultName : inputName).lineLimit(1).truncationMode(.middle).frame(width: 136, alignment: .leading).allowsHitTesting(false) }
+                .accessibilityLabel("Microphone: \(inputName)").help(inputName)
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
             }.padding(.horizontal, 14).frame(height: 34)
 

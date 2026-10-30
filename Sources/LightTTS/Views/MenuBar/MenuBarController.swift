@@ -96,7 +96,7 @@ import LightTTSCore
         else {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
             w.standardWindowButton(.zoomButton)?.isHidden = true
-            w.title = "LightTTS"; w.titlebarAppearsTransparent = true
+            w.title = "LightTTS"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false; w.delegate = self; window = w
             let host = NSHostingView(rootView: AnyView(SettingsView(controller: app).ignoresSafeArea()))
             settingsHost = host
