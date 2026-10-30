@@ -171,9 +171,9 @@ private struct ConfigurationPageView: View {
     private var configurationPage: some View {
         ScrollView { VStack(alignment: .leading, spacing: 0) {
             SettingsCard {
-                HStack(alignment: .top) { Text("Theme").padding(.top, 2); Spacer(); choices(["Auto", "Light", "Dark"], selection: $theme, icons: ["circle.lefthalf.filled", "sun.max.fill", "moon.fill"]) }.padding(.top, 12).padding(.bottom, 7)
+                HStack(alignment: .top) { Text("Theme").padding(.top, 2); Spacer(); choices(["Auto", "Light", "Dark"], selection: $theme, icons: ["circle.lefthalf.filled", "sun.max.fill", "moon.fill"]) }.padding(.top, 12).padding(.bottom, 4)
                 PageRule()
-                HStack(alignment: .top) { Text("Recording window").padding(.top, 1); Spacer(); choices(["Classic", "Mini", "None"], selection: $recordingWindow, icons: ["waveform", "waveform", "eye.slash"]) }.padding(.top, 12).padding(.bottom, 10)
+                HStack(alignment: .top) { Text("Recording window").padding(.top, 1); Spacer(); choices(["Classic", "Mini", "None"], selection: $recordingWindow, icons: ["waveform", "waveform", "eye.slash"]).padding(.trailing, 4) }.padding(.top, 12).padding(.bottom, 10)
                 PageRule()
                 HStack(spacing: 8) { Text("Always show"); Image(systemName: "questionmark.circle").help("Keep the mini recording window visible"); Spacer(); Toggle("", isOn: $alwaysShow).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Always show")).disabled(recordingWindow != "Mini") }.frame(height: 45)
             }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }.onChange(of: alwaysShow) { _ in controller.refreshRecordingWindow() }
@@ -248,7 +248,7 @@ private struct ConfigurationPageView: View {
     }
     private func choices(_ values: [String], selection: Binding<String>, icons: [String]) -> some View {
         HStack(spacing: values.first == "Auto" ? 15 : 16) { ForEach(Array(values.enumerated()), id: \.offset) { index, value in
-            Button { selection.wrappedValue = value } label: { VStack(spacing: 5) {
+            Button { selection.wrappedValue = value } label: { VStack(spacing: values.first == "Auto" ? 8 : 5) {
                 ZStack {
                     if values.first == "Auto" {
                         if index == 0 {
