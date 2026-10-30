@@ -2,11 +2,13 @@ import AppKit
 import CoreAudio
 import AudioToolbox
 
-final class AudioSettings {
+final class AudioSettings: @unchecked Sendable {
+    private let gate = MediaGate()
+    private let sessionQueue = DispatchQueue(label: "com.lighttts.audio-session")
     private var volumeSession: OutputVolumeSession?
     private let pauseSession: MediaPauseSession
-    init(media: any MediaControlling = SystemMediaController()) {
-        pauseSession = MediaPauseSession(controller: (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty ? media : NoopMediaController())
+    init(media: (any MediaControlling)? = nil) {
+        pauseSession = MediaPauseSession(controller: (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty ? (media ?? SystemMediaController(gate: gate)) : NoopMediaController())
     }
     private let volumeQueue = DispatchQueue(label: "com.lighttts.volume")
 
@@ -57,7 +59,16 @@ final class AudioSettings {
         var value = value
         _ = AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
     }
-    func begin() -> String? {
+    func begin(completion: @escaping @Sendable (String?) -> Void) {
+        let token = gate.start()
+        sessionQueue.async { [self] in
+            guard gate.isCurrent(token) else { return }
+            gate.setOperation(token)
+            let warning = beginSession()
+            if !gate.isCurrent(token) { endSession() } else { completion(warning) }
+        }
+    }
+    private func beginSession() -> String? {
         let defaults = UserDefaults.standard
         let testAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
         if !testAudio, defaults.bool(forKey: "increaseMicVolume"), let input = Self.device(for: defaults.string(forKey: "inputDeviceUID") ?? "", scope: kAudioDevicePropertyScopeInput) { _ = Self.volume(input, scope: kAudioDevicePropertyScopeInput, set: 1) }
@@ -76,12 +87,16 @@ final class AudioSettings {
         return nil
     }
     func end() {
+        gate.stop()
+        sessionQueue.async { [self] in endSession() }
+    }
+    private func endSession() {
         volumeQueue.async { [self] in
             self.volumeSession?.end(); self.volumeSession = nil
         }
         pauseSession.end()
     }
-    func waitForRestoration() async { await withCheckedContinuation { continuation in volumeQueue.async { continuation.resume() } } }
+    func waitForRestoration() async { await withCheckedContinuation { continuation in sessionQueue.async { [self] in volumeQueue.async { continuation.resume() } } } }
     static func cue(start: Bool) {
         guard (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty else { return }
         let defaults = UserDefaults.standard
@@ -97,7 +112,19 @@ private struct SystemOutputVolume: OutputVolumeControlling {
     func setVolume(_ value: Float, channel: UInt32) { AudioSettings.setOutputVolume(device, element: channel, value: value) }
 }
 // MediaRemote provides the system media-key target without Apple Events.
+private final class MediaGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+    private var active = false
+    private var operation = 0
+    func setOperation(_ token: Int) { lock.lock(); operation = token; lock.unlock() }
+    func start() -> Int { lock.lock(); defer { lock.unlock() }; generation += 1; active = true; return generation }
+    func stop() { lock.lock(); generation += 1; active = false; lock.unlock() }
+    func isCurrent(_ token: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == token }
+    func ifActive(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == operation && action() }
+}
 private struct SystemMediaController: MediaControlling {
+    let gate: MediaGate
     private static let framework = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
     private typealias IsPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (Bool) -> Void) -> Void
     private typealias GetClient = @convention(c) (DispatchQueue, @escaping @convention(block) (UnsafeRawPointer?) -> Void) -> Void
@@ -139,7 +166,7 @@ private struct SystemMediaController: MediaControlling {
         return unsafeBitCast(symbol, to: SendCommand.self)(command, nil)
     }
     func pausePlaying() throws -> [String] {
-        guard let identity = target(), isPlaying() == true, target() == identity, send(1) else { return [] }
+        guard let identity = target(), isPlaying() == true, target() == identity, gate.ifActive({ send(1) }) else { return [] }
         return [identity]
     }
     func resume(_ players: [String]) {

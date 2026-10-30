@@ -8,6 +8,7 @@ import LightTTSCore
 import ServiceManagement
 
 import Darwin
+import IOKit.ps
 
 
 @MainActor final class RecordingLevel: ObservableObject { @Published var value: Float = 0 }
@@ -56,6 +57,7 @@ import Darwin
     private var sessionAutoPaste = true
     private var testAudio: [Float]?
     private var defaultsObserver: NSObjectProtocol?
+    private var powerSource: CFRunLoopSource?
     private var pushHeld = false
     private var pushOwnsRecording = false
     private var mouseStart: Date?
@@ -154,17 +156,24 @@ import Darwin
             } else { self.history = data.1; self.pruneHistory() }
             if CommandLine.arguments.contains("--history-detail") { self.selectedHistory = self.history.first }
             LaunchTrace.mark("catalog-ready"); self.onCatalogReady?()
+            if self.onACPower && !CommandLine.arguments.contains("--ui-fixture") { self.warmSelected() }
 
             await ModelStore.refreshAppleStatus(); self.objectWillChange.send()
 
         }
         if UserDefaults.standard.string(forKey: "recordingSound") == "Muffle" { UserDefaults.standard.set("Lower", forKey: "recordingSound") }
+        powerSource = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            let controller = Unmanaged<AppController>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in controller.powerChanged() }
+        }, Unmanaged.passUnretained(self).toOpaque())?.takeRetainedValue()
+        if let powerSource { CFRunLoopAddSource(CFRunLoopGetMain(), powerSource, .defaultMode) }
         preparePanel()
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == "idle", ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] == nil else { return }
-                if !self.keepModelLoaded && (self.engine != nil || self.warming != nil) { self.unloadEngine() }
+                if !self.onACPower && !self.keepModelLoaded && (self.engine != nil || self.warming != nil) { self.unloadEngine() }
                 if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
             }
         }
@@ -216,13 +225,25 @@ import Darwin
         warming = task
         if state == "idle" || state == "error" { scheduleEngineUnload() }
         Task { [weak self] in
-            do { _ = try await task.value }
+            do { let resolved = try await task.value
+                guard let self, self.warmingToken == token else { (resolved as? HelperEngine)?.terminate(); return }
+                self.engine = resolved; self.loadedID = selected; self.warming = nil; self.warmingID = ""
+                if self.state == "idle" || self.state == "error" { self.scheduleEngineUnload() }
+            }
             catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = ""; if !(error is CancellationError) { self.fail(error.localizedDescription) } }
         }
     }
     func reloadSelectedModel() {
-        warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID()
-        engine = nil; loadedID = ""
+        unloadEngine()
+        if onACPower { warmSelected() }
+    }
+    private var onACPower: Bool {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(), let source = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return false }
+        return source as String == kIOPSACPowerValue
+    }
+    private func powerChanged() {
+        if onACPower { unloadTimer?.invalidate(); unloadTimer = nil; warmSelected() }
+        else if state == "idle" || state == "error" { scheduleEngineUnload() }
     }
     @discardableResult func installHotkey() -> Bool {
         guard !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") && !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return false }
@@ -308,7 +329,10 @@ import Darwin
                 audio = capture; started = Date(); state = "recording"; if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }; showPanel()
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == current, self.state == "recording" else { return }
-                    if manageAudio { self.message = self.audioSettings.begin() ?? "" }
+                    if manageAudio { self.audioSettings.begin { [weak self] warning in Task { @MainActor in
+                        guard let self, self.generation == current, self.state == "recording" else { return }
+                        self.message = warning ?? ""
+                    } } }
                     AudioSettings.cue(start: true)
                 }
             } catch { fail(error.localizedDescription) }
@@ -330,6 +354,7 @@ import Darwin
                 let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
                 if loadedID != selected || engine == nil {
+                    state = "loading"
                     warmSelected()
                     let token = warmingToken
                     let resolved: any TranscriptionEngine
@@ -341,6 +366,7 @@ import Darwin
                     try Task.checkCancellation(); guard current == generation else { return }
                     engine = resolved; loadedID = selected
                 }
+                state = "processing"
                 guard let engine else { return }
                 try Task.checkCancellation(); guard current == generation else { return }
 
@@ -351,7 +377,7 @@ import Darwin
                 LaunchTrace.mark("inference-finished")
 
                 guard current == generation else { return }
-                if !keepModelLoaded { unloadEngine() }
+                if !keepModelLoaded && !onACPower { unloadEngine() }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
                 if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
                     print("LIGHTTTS_TEST transcription completed, samples: \(samples.count)")
@@ -410,6 +436,7 @@ import Darwin
 
     private func hide() {
         state = "idle"; recordingLevel.value = 0
+        if onACPower { warmSelected() }
         scheduleEngineUnload()
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         else { panel?.orderOut(nil) }
@@ -433,6 +460,7 @@ import Darwin
     private func scheduleEngineUnload() {
         unloadTimer?.invalidate(); unloadTimer = nil
         guard engine != nil || warming != nil else { return }
+        if onACPower { return }
         guard keepModelLoaded else { unloadEngine(); return }
         let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") == nil ? 300 : UserDefaults.standard.double(forKey: "modelIdleTimeoutSeconds")
         let interval = max(1, configured)

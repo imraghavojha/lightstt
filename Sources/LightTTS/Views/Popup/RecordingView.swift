@@ -15,6 +15,8 @@ struct RecordingView: View {
                             .frame(width: 2, height: max(2, 2 + CGFloat(level.value) * [6, 10, 14, 14, 10, 6][index]))
                     }
                 }.offset(x: -1)
+            } else if controller.state == "loading" {
+                Text("Loading model…").font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
             } else if controller.state == "processing" {
                 Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
             } else if controller.state == "done" {
@@ -24,7 +26,7 @@ struct RecordingView: View {
                     .help(controller.message)
             }
         }
-        .frame(width: idle ? 45 : 60, height: idle ? 8 : 32)
+        .frame(width: idle ? 45 : (controller.state == "loading" ? 120 : 60), height: idle ? 8 : 32)
         .background(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255), in: Capsule())
         .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 1))
         .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)

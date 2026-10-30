@@ -27,7 +27,7 @@ public actor WhisperCppEngine: TranscriptionEngine {
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         params.print_progress = false; params.print_realtime = false; params.print_timestamps = false
         params.no_context = true
-        params.no_timestamps = true
+        params.suppress_nst = true
         var performanceCores: Int32 = 0
         var size = MemoryLayout<Int32>.size
         if sysctlbyname("hw.perflevel0.physicalcpu", &performanceCores, &size, nil, 0) == 0, performanceCores > 0 { params.n_threads = performanceCores }
@@ -42,7 +42,8 @@ public actor WhisperCppEngine: TranscriptionEngine {
             let status = samples.withUnsafeBufferPointer { whisper_full(context, params, $0.baseAddress, Int32($0.count)) }
             try Task.checkCancellation()
             guard status == 0 else { throw SpeechError.model("Whisper inference failed (\(status))") }
-            return (0..<whisper_full_n_segments(context)).compactMap { whisper_full_get_segment_text(context, $0).map { String(cString: $0) } }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = (0..<whisper_full_n_segments(context)).compactMap { whisper_full_get_segment_text(context, $0).map { String(cString: $0) } }.joined()
+            return text.replacingOccurrences(of: #"\[[^\]\n]*\]|\([^()\n]*\)"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
         }, onCancel: { flag.cancel() })
     }
 }
