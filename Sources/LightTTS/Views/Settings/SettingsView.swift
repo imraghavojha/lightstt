@@ -191,7 +191,7 @@ private struct ConfigurationPageView: View {
                 ConfigurationApplicationRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; PageRule()
                 ConfigurationApplicationRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: Binding(get: { controller.loginEnabled }, set: { controller.setLoginEnabled($0) })).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")) }; PageRule()
                 ConfigurationApplicationRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Error logging")).help("Write errors to a local log") }; PageRule()
-                ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { SettingsPopup(selection: retentionBinding, options: [(0, "Forever"), (1, "1 day"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (180, "6 months"), (365, "1 year")], width: 125).frame(width: 125, height: 28) }
+                ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { RetentionPopup(selection: retentionBinding) }
             }
             SettingsCard { Button { controller.showAdvanced.toggle() } label: { HStack { Text("Advanced settings"); Spacer(); Image(systemName: controller.showAdvanced ? "chevron.down" : "chevron.right").foregroundStyle(.secondary) }.frame(height: 48).contentShape(Rectangle()) }.buttonStyle(.plain) }.padding(.top, 18)
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
@@ -309,6 +309,27 @@ private struct ConfigurationApplicationRow<Content: View>: View {
 private struct PageRule: View {
     @Environment(\.colorScheme) private var scheme
     var body: some View { Rectangle().fill(scheme == .dark ? Color(red: 80/255, green: 81/255, blue: 86/255) : Color(white: 226/255)).frame(height: 0.5) }
+}
+
+private struct RetentionPopup: View {
+    @Binding var selection: Int
+    private let options = [(0, "Forever"), (1, "1 day"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (180, "6 months"), (365, "1 year")]
+    private let surface = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 75/255, green: 77/255, blue: 82/255, alpha: 1)
+            : NSColor(srgbRed: 253/255, green: 253/255, blue: 253/255, alpha: 1)
+    }))
+    var body: some View {
+        Menu {
+            ForEach(options, id: \.0) { option in Button(option.1) { selection = option.0 } }
+        } label: {
+            HStack { Text(options.first(where: { $0.0 == selection })?.1 ?? "Forever"); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }
+                .padding(.horizontal, 9).frame(width: 125, height: 28)
+                .background(surface, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.18), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.10), radius: 1, y: 1)
+        }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 125, height: 28)
+    }
 }
 
 /// Native popup chrome keeps the indicator and enclosing surface together.
