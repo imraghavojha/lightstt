@@ -21,16 +21,11 @@ struct SettingsView: View {
                 Spacer(); Button(attached ? "Detach into window" : "Back to menu") { detach() }; Button("Quit LightTTS") { NSApp.terminate(nil) }
             }.padding().frame(width: 150).background(.quaternary.opacity(0.4))
             VStack(alignment: .leading) {
-                Text(controller.settingsSelection).font(.title2.bold())
+                if controller.settingsSelection != "Models" { Text(controller.settingsSelection).font(.title2.bold()) }
                 switch controller.settingsSelection {
                 case "Sound": Text("Microphone: system default"); Text("Audio is processed locally at 16 kHz mono.").foregroundStyle(.secondary)
                 case "Models":
-                    Picker("Selected model", selection: $selectedModel) { ForEach(controller.models) { Text($0.name).tag($0.id) } }
-                    ScrollView { LazyVStack(alignment: .leading) { ForEach(controller.models) { model in HStack { Text(model.name); Spacer(); if ModelStore.exists(model) { Button("Delete") { controller.deleteModel(model) } } else { Button(controller.busyModel == model.id ? "Downloading…" : "Download") { controller.download(model) }.disabled(controller.busyModel != nil) } } } } }
-                    HStack { Button("Import file…") { controller.importLocalModel() }; TextField("Model URL", text: $customModelURL); Button("Import URL") { controller.importRemoteModel(customModelURL, sha256: customModelSHA256) } }
-                    TextField("SHA-256 for URL import", text: $customModelSHA256)
-                    if controller.busyModel != nil { HStack { ProgressView(value: controller.downloadProgress); Button("Cancel") { controller.cancelDownload() } } }
-                    if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
+                    ModelsPageView(controller: controller)
                 case "Library": ScrollView { LazyVStack(alignment: .leading) { ForEach(controller.history) { item in VStack(alignment: .leading) { Text(item.text); Text(item.date, style: .date).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading); Divider() } } }
                 default:
                     Toggle("Push to talk", isOn: $pushToTalk)
@@ -42,7 +37,7 @@ struct SettingsView: View {
                     Text("Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut. Accessibility allows text insertion.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-            }.padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }.padding(controller.settingsSelection == "Models" ? 0 : 16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }.frame(width: 650, height: 440).onChange(of: selectedModel) { _ in controller.warmSelected() }
     }
 }

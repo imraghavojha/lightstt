@@ -20,7 +20,7 @@ import Foundation
         #if DEBUG
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(openURL(_:withReplyEvent:)), forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
         #endif
-        if isUITest { hotkeyReady = true; writeReadyMarker(); return }
+        if isUITest || CommandLine.arguments.contains("--models-window") { hotkeyReady = true; writeReadyMarker(); return }
         hotkeyReady = controller.installHotkey(); LaunchTrace.mark(hotkeyReady ? "hotkey-installed" : "hotkey-unavailable"); writeReadyMarker()
         if !UserDefaults.standard.bool(forKey: "permissionsOnboardingRequested") {
             UserDefaults.standard.set(true, forKey: "permissionsOnboardingRequested")
@@ -34,7 +34,7 @@ import Foundation
             if !testAudio && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined { Task { _ = await AVCaptureDevice.requestAccess(for: .audio) } }
         }
     }
-    func applicationDidBecomeActive(_ notification: Notification) { if !isUITest && AXIsProcessTrusted() && CGPreflightListenEventAccess() { hotkeyReady = controller.installHotkey(); writeReadyMarker() } }
+    func applicationDidBecomeActive(_ notification: Notification) { if !isUITest && !CommandLine.arguments.contains("--models-window") && AXIsProcessTrusted() && CGPreflightListenEventAccess() { hotkeyReady = controller.installHotkey(); writeReadyMarker() } }
     func catalogDidLoad() { catalogReady = true; writeReadyMarker() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { await controller.prepareToQuit(); sender.reply(toApplicationShouldTerminate: true) }
@@ -64,6 +64,9 @@ import Foundation
         }
         if let state = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] { controller.showPreviewState(state) }
         LaunchTrace.mark("status-item-created")
+        if CommandLine.arguments.contains("--light-appearance") { app.appearance = NSAppearance(named: .aqua) }
+        if CommandLine.arguments.contains("--dark-appearance") { app.appearance = NSAppearance(named: .darkAqua) }
+        if CommandLine.arguments.contains("--models-window") { DispatchQueue.main.async { controller.settingsSelection = "Models"; menu.openSettingsWindow() } }
         withExtendedLifetime((controller, menu, delegate)) { app.run() }
     }
 }

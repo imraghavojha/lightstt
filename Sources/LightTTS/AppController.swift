@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import AVFoundation
 import ApplicationServices
+import CryptoKit
 import LightTTSCore
 import Darwin
 
@@ -275,18 +276,82 @@ import Darwin
             else { p.alphaValue = 1 } }
     }
     private func saveHistory() { try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true); if let data = try? JSONEncoder().encode(history) { try? data.write(to: historyURL, options: .atomic) } }
-    func importLocalModel() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.data]; panel.allowsMultipleSelection = false
+    func importLocalModel(engine: String = "whisper", version: String = "") {
+        let panel = NSOpenPanel(); panel.canChooseDirectories = engine != "whisper"; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let id = "custom-" + UUID().uuidString
-        do { try ModelStore.importFile(url, id: id); addCustom(Model(id: id, name: url.lastPathComponent, engine: "whisper")) }
-        catch { message = error.localizedDescription }
+        do {
+            var model = Model(id: id, name: url.lastPathComponent, engine: engine, version: version.isEmpty ? nil : version)
+            if engine == "whisper" { try ModelStore.importFile(url, id: id) }
+            else {
+                let isDirectory = (try url.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true
+                let source = isDirectory && !url.lastPathComponent.hasSuffix(".mlmodelc") ? url : url.deletingLastPathComponent()
+                if engine == "sherpa" { model.files = try SherpaModelFiles.requiredFiles(version).map { ModelFile(path: $0, url: source.appendingPathComponent($0), size: 0, sha256: "") } }
+                try ModelStore.importDirectory(source, model: model)
+            }
+            addCustom(model)
+        } catch { message = error.localizedDescription }
     }
     func importRemoteModel(_ address: String, sha256: String) {
-        guard let url = URL(string: address), url.scheme?.lowercased() == "https" else { message = "Enter a valid HTTPS model URL."; return }
+        let input = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved: String
+        if !input.contains("://"), input.split(separator: "/").count == 2 {
+            resolved = "https://huggingface.co/\(input)/resolve/main/ggml-model.bin"
+        } else { resolved = input }
+        guard let url = URL(string: resolved), url.scheme?.lowercased() == "https" else { message = "Enter a valid HTTPS model URL or Hugging Face owner/repository."; return }
         guard sha256.count == 64, sha256.allSatisfy({ $0.isHexDigit }) else { message = "Enter the model SHA-256."; return }
         let model = Model(id: "custom-" + UUID().uuidString, name: url.lastPathComponent, engine: "whisper", url: url, sha256: sha256.lowercased())
         addCustom(model); download(model)
+    }
+    func importModelRepository(_ address: String, engine: String, version: String) {
+        let value = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = value.replacingOccurrences(of: "https://huggingface.co/", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let parts = raw.split(separator: "/")
+        guard parts.count >= 2, (parts.count == 2 || parts[2] == "resolve" || parts[2] == "blob"), parts.prefix(2).allSatisfy({ $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) } }) else { message = "Enter a Hugging Face owner/repository or file URL."; return }
+        let repo = parts.prefix(2).joined(separator: "/")
+        Task {
+            do {
+                guard let api = URL(string: "https://huggingface.co/api/models/\(repo)?blobs=true") else { throw SpeechError.model("Invalid repository") }
+                let (data, response) = try await URLSession.shared.data(from: api)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let revision = json["sha"] as? String, let siblings = json["siblings"] as? [[String: Any]] else { throw SpeechError.model("Cannot read repository metadata") }
+                let names: [String]
+                if engine == "sherpa" { names = try SherpaModelFiles.requiredFiles(version) }
+                else {
+                    let prefixes: [String] = engine == "canary" ? ["EncoderInt4.mlmodelc/", "DecoderInt4.mlmodelc/", "Projection.mlmodelc/", "Preprocessor.mlmodelc/"] : ["Encoder.mlmodelc/", "Decoder.mlmodelc/", "Decoderv2.mlmodelc/", "JointDecision.mlmodelc/", "JointDecisionv3.mlmodelc/", "Jointerv2.mlmodelc/", "Preprocessor.mlmodelc/"]
+                    names = siblings.compactMap { $0["rfilename"] as? String }.filter { name in prefixes.contains(where: { name.hasPrefix($0) }) || ["vocab.json", "parakeet_vocab.json", "parakeet_v3_vocab.json", "config.json", "metadata.json"].contains(name) }
+                    guard !names.isEmpty else { throw SpeechError.model("Repository does not contain compatible Core ML files") }
+                }
+                var files: [ModelFile] = []
+                for name in names {
+                    guard let entry = siblings.first(where: { $0["rfilename"] as? String == name }), let size = (entry["size"] as? NSNumber)?.int64Value, name.split(separator: "/").allSatisfy({ $0 != "." && $0 != ".." && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) } }), let url = URL(string: "https://huggingface.co/\(repo)/resolve/\(revision)/\(name)") else { throw SpeechError.model("Repository is missing \(name)") }
+                    var checksum = (entry["lfs"] as? [String: Any])?["sha256"] as? String
+                    if checksum == nil {
+                        guard size <= 2_000_000 else { throw SpeechError.model("Repository is missing a checksum for \(name)") }
+                        let (contents, reply) = try await URLSession.shared.data(from: url)
+                        guard let response = reply as? HTTPURLResponse, (200..<300).contains(response.statusCode), Int64(contents.count) == size else { throw SpeechError.model("Cannot read \(name)") }
+                        checksum = SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined()
+                    }
+                    guard let checksum else { throw SpeechError.model("Missing checksum") }
+                    files.append(ModelFile(path: name, url: url, size: size, sha256: checksum))
+                }
+                var model = Model(id: "custom-" + UUID().uuidString, name: repo, engine: engine, version: version)
+                model.files = files; model.size = files.reduce(0) { $0 + $1.size }; addCustom(model); download(model)
+            } catch { message = error.localizedDescription }
+        }
+    }
+    func importModelManifest(_ address: String, engine: String, version: String) {
+        guard let manifestURL = URL(string: address), ["https", "http"].contains(manifestURL.scheme?.lowercased() ?? "") else { message = "Enter an HTTP(S) manifest URL."; return }
+        Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: manifestURL)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), data.count <= 2_000_000 else { throw SpeechError.model("Cannot read model manifest") }
+                let files = try JSONDecoder().decode([ModelFile].self, from: data)
+                guard !files.isEmpty, files.count <= 10_000, files.allSatisfy({ file in file.size > 0 && file.size <= 20_000_000_000 && !file.path.isEmpty && file.sha256.count == 64 && file.sha256.allSatisfy(\.isHexDigit) && ["https", "http"].contains(file.url.scheme?.lowercased() ?? "") && !file.path.hasPrefix("/") && file.path.split(separator: "/").allSatisfy { $0 != "." && $0 != ".." } }) else { throw SpeechError.model("Model manifest has invalid files") }
+                if engine == "sherpa" { let names = try Set(SherpaModelFiles.requiredFiles(version)); guard names.isSubset(of: Set(files.map(\.path))) else { throw SpeechError.model("Manifest is missing model files") } }
+                var model = Model(id: "custom-" + UUID().uuidString, name: manifestURL.lastPathComponent, engine: engine, version: version)
+                model.files = files; model.size = files.reduce(0) { $0 + $1.size }; addCustom(model); download(model)
+            } catch { message = error.localizedDescription }
+        }
     }
     private func addCustom(_ model: Model) {
         models.append(model)
@@ -301,6 +366,7 @@ import Darwin
             if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
             objectWillChange.send()
         } catch { message = error.localizedDescription }
+
     }
     func cancelDownload() { downloadTask?.cancel() }
     func prepareToQuit() async { unloadEngine(); let task = downloadTask; task?.cancel(); await task?.value }

@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import FluidAudio
+import CoreML
 import whisper
 import LightTTSCore
 
@@ -43,13 +44,114 @@ public actor WhisperCppEngine: TranscriptionEngine {
 
 public actor ParakeetEngine: TranscriptionEngine {
     private let manager: AsrManager
+    private let decoderLayers: Int
     public init(directory: URL, version: String) async throws {
-        let variant: AsrModelVersion = version == "v2" ? .v2 : .v3
-        let models = try await AsrModels.load(from: directory, version: variant)
+        let variant = try InferenceParakeetVariant.resolve(version)
+        self.decoderLayers = variant.decoderLayers
+        let models: AsrModels
+        if ["redux", "ultra", "tdt-ctc-110m", "ja"].contains(version) {
+            let config = MLModelConfiguration(); config.computeUnits = .cpuOnly
+            models = try AsrModels.loadLocal(from: directory, version: variant, configuration: config)
+        } else { models = try await AsrModels.load(from: directory, version: variant) }
         let manager = AsrManager(config: .default)
         try await manager.loadModels(models)
         self.manager = manager
     }
-    public func transcribe(samples: [Float]) async throws -> String { try Task.checkCancellation(); var state = try TdtDecoderState(); let result = try await manager.transcribe(samples, decoderState: &state); try Task.checkCancellation(); return result.text }
+    public func transcribe(samples: [Float]) async throws -> String { try Task.checkCancellation(); var state = try TdtDecoderState(decoderLayers: decoderLayers); let result = try await manager.transcribe(samples, decoderState: &state); try Task.checkCancellation(); return result.text }
 }
 
+import SherpaOnnx
+import SherpaOnnxC
+
+public actor SherpaEngine: TranscriptionEngine {
+    private let recognizer: OpaquePointer
+    public init(directory: URL, type: String) throws {
+        func file(_ name: String) -> String { directory.appendingPathComponent(name).path }
+        let names = try SherpaModelFiles.requiredFiles(type)
+        guard names.allSatisfy({ FileManager.default.fileExists(atPath: file($0)) }) else { throw SpeechError.model("Incomplete sherpa model") }
+        let model: SherpaOnnxOfflineModelConfig
+        switch type {
+        case "moonshine":
+            let moonshine = sherpaOnnxOfflineMoonshineModelConfig(preprocessor: file(names[0]), encoder: file(names[1]), uncachedDecoder: file(names[2]), cachedDecoder: file(names[3]))
+            model = sherpaOnnxOfflineModelConfig(tokens: file("tokens.txt"), numThreads: 4, moonshine: moonshine)
+        case "sense_voice":
+            model = sherpaOnnxOfflineModelConfig(tokens: file("tokens.txt"), numThreads: 4, senseVoice: sherpaOnnxOfflineSenseVoiceModelConfig(model: file("model.int8.onnx"), useInverseTextNormalization: true))
+        case "zipformer":
+            model = sherpaOnnxOfflineModelConfig(tokens: file(names[3]), transducer: sherpaOnnxOfflineTransducerModelConfig(encoder: file(names[0]), decoder: file(names[1]), joiner: file(names[2])), numThreads: 4)
+        case "nemo_parakeet":
+            model = sherpaOnnxOfflineModelConfig(tokens: file(names[3]), transducer: sherpaOnnxOfflineTransducerModelConfig(encoder: file(names[0]), decoder: file(names[1]), joiner: file(names[2])), numThreads: 4, modelType: "nemo_transducer")
+        case "nemo_canary":
+            model = sherpaOnnxOfflineModelConfig(tokens: file(names[2]), numThreads: 4, canary: sherpaOnnxOfflineCanaryModelConfig(encoder: file(names[0]), decoder: file(names[1])))
+        case "whisper_onnx":
+            model = sherpaOnnxOfflineModelConfig(tokens: file(names[2]), whisper: sherpaOnnxOfflineWhisperModelConfig(encoder: file(names[0]), decoder: file(names[1]), language: "en"), numThreads: 4, modelType: "whisper")
+        default:
+            model = sherpaOnnxOfflineModelConfig(tokens: file("tokens.txt"), paraformer: sherpaOnnxOfflineParaformerModelConfig(model: file("model.int8.onnx")), numThreads: 4, modelType: "paraformer")
+        }
+        var config = sherpaOnnxOfflineRecognizerConfig(featConfig: sherpaOnnxFeatureConfig(sampleRate: 16000, featureDim: 80), modelConfig: model)
+        guard let value = SherpaOnnxCreateOfflineRecognizer(&config) else { throw SpeechError.model("Could not load sherpa-onnx model") }; recognizer = value
+    }
+    deinit { SherpaOnnxDestroyOfflineRecognizer(recognizer) }
+    public func transcribe(samples: [Float]) async throws -> String {
+        guard !samples.isEmpty, let stream = SherpaOnnxCreateOfflineStream(recognizer) else { throw SpeechError.audio("Cannot create recognition stream") }
+        defer { SherpaOnnxDestroyOfflineStream(stream) }
+        samples.withUnsafeBufferPointer { SherpaOnnxAcceptWaveformOffline(stream, 16000, $0.baseAddress, Int32($0.count)) }
+        SherpaOnnxDecodeOfflineStream(recognizer, stream)
+        guard let result = SherpaOnnxGetOfflineStreamResult(stream) else { throw SpeechError.model("Recognition failed") }
+        defer { SherpaOnnxDestroyOfflineRecognizerResult(result) }
+        return result.pointee.text.map { String(cString: $0) } ?? ""
+    }
+}
+
+import Speech
+
+@available(macOS 26, *)
+public actor AppleSpeechEngine: TranscriptionEngine {
+    public init() {}
+    public func transcribe(samples: [Float]) async throws -> String {
+        guard !samples.isEmpty else { throw SpeechError.audio("No audio captured") }
+        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { throw SpeechError.model("Apple Speech does not support the current locale") }
+        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+        guard await AssetInventory.status(forModules: [transcriber]) == .installed else { throw SpeechError.model("Install Apple Speech assets first") }
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false), let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)), let channel = buffer.floatChannelData?[0] else { throw SpeechError.audio("Cannot allocate audio") }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { source in if let base = source.baseAddress { channel.update(from: base, count: samples.count) } }
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        defer { try? FileManager.default.removeItem(at: temp) }
+        do { let output = try AVAudioFile(forWriting: temp, settings: format.settings); try output.write(from: buffer) }
+        let file = try AVAudioFile(forReading: temp)
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let result = Task { () throws -> String in
+            var text = ""
+            for try await item in transcriber.results { text += String(item.text.characters) }
+            return text
+        }
+        do { try await analyzer.start(inputAudioFile: file, finishAfterFile: true); return try await result.value }
+        catch { result.cancel(); await analyzer.cancelAndFinishNow(); throw error }
+    }
+}
+
+public actor CanaryEngine: TranscriptionEngine {
+    private let manager: CanaryManager
+    public init(directory: URL) throws {
+        let config = MLModelConfiguration(); config.computeUnits = .cpuOnly
+        func load(_ name: String) throws -> MLModel { try MLModel(contentsOf: directory.appendingPathComponent(name + ".mlmodelc"), configuration: config) }
+        let models = try CanaryModels(preprocessor: load("Preprocessor"), encoder: load("EncoderInt4"), decoder: load("DecoderInt4"), projection: load("Projection"), tokenizer: Tokenizer(vocabPath: directory.appendingPathComponent("vocab.json")))
+        manager = CanaryManager(models: models)
+    }
+    public func transcribe(samples: [Float]) async throws -> String { try await manager.transcribe(audio: samples) }
+}
+
+
+public enum InferenceParakeetVariant {
+    public static func resolve(_ value: String?) throws -> AsrModelVersion {
+        switch value {
+        case "v2": return .v2
+        case "v3": return .v3
+        case "ultra": return .ultra
+        case "redux": return .redux
+        case "tdt-ctc-110m": return .tdtCtc110m
+        case "ja": return .tdtJa
+        default: throw SpeechError.model("Unsupported Parakeet variant")
+        }
+    }
+}

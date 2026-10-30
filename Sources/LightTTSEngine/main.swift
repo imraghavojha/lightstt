@@ -1,4 +1,5 @@
 import Foundation
+import Speech
 import FluidAudio
 import LightTTSCore
 import LightTTSInference
@@ -9,6 +10,25 @@ import LightTTSInference
             do { _ = try await AsrModels.download(to: URL(fileURLWithPath: CommandLine.arguments[2]), version: CommandLine.arguments[3] == "v2" ? .v2 : .v3); return }
             catch { fputs("\(error)\n", stderr); exit(1) }
         }
+        if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "download-model" {
+            do {
+                let model = try JSONDecoder().decode(Model.self, from: Data(CommandLine.arguments[2].utf8))
+                if model.engine == "apple" {
+                    guard #available(macOS 26, *), let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { throw SpeechError.model("Apple Speech unavailable") }
+                    let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+                    if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) { try await request.downloadAndInstall() }
+                    guard await AssetInventory.status(forModules: [transcriber]) == .installed else { throw SpeechError.model("Apple Speech assets unavailable") }
+                    try Data().write(to: ModelStore.directory.appendingPathComponent(".apple-speech-installed"), options: .atomic)
+                } else if model.engine == "canary" {
+                    let downloaded = try await CanaryModels.download()
+                    try FileManager.default.copyItem(at: downloaded, to: ModelStore.path(model))
+                } else if ["redux", "ultra", "tdt-ctc-110m", "ja"].contains(model.version ?? "") {
+                    let repo: Repo = model.version == "redux" ? .parakeetRedux : model.version == "ultra" ? .parakeetUltra : model.version == "ja" ? .parakeetJa : .parakeetTdtCtc110m
+                    try await ModelHub.download(repo, to: ModelStore.path(model).deletingLastPathComponent())
+                } else { _ = try await AsrModels.download(to: ModelStore.path(model), version: try InferenceParakeetVariant.resolve(model.version)) }
+                return
+            } catch { fputs("\(error)\n", stderr); exit(1) }
+        }
         var engine: (any TranscriptionEngine)?
         while let line = readLine(), let data = line.data(using: .utf8) {
             guard let command = try? JSONDecoder().decode(Command.self, from: data) else { continue }
@@ -17,8 +37,7 @@ import LightTTSInference
                 switch command.action {
                 case "warm":
                     guard let model = command.model else { throw SpeechError.model("Missing model") }
-                    if model.engine == "parakeet" { engine = try await ParakeetEngine(directory: ModelStore.path(model), version: model.version ?? "v3") }
-                    else { engine = try WhisperCppEngine(modelURL: ModelStore.path(model)) }
+                    engine = try await InferenceFactory.engine(for: model)
                 case "transcribe":
                     guard let engine, let path = command.audio else { throw SpeechError.model("Engine is not ready") }
                     let data = try Data(contentsOf: URL(fileURLWithPath: path))

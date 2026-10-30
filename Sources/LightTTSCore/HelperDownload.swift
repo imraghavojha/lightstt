@@ -3,7 +3,7 @@ public enum HelperDownload {
     public static func run(_ model: Model) async throws {
         let process = Process()
         process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/LightTTSEngine")
-        process.arguments = ["download", ModelStore.path(model).path, model.version ?? "v3"]
+        process.arguments = ["download-model", String(data: try JSONEncoder().encode(model), encoding: .utf8)!]
         try process.run()
         await withTaskCancellationHandler(operation: {
             await Task.detached { process.waitUntilExit() }.value
