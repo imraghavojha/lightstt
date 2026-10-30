@@ -49,3 +49,21 @@ final class ShortcutButton: NSButton {
         return names[code]
     }
 }
+
+struct MouseShortcutRecorder: NSViewRepresentable {
+    func makeNSView(context: Context) -> MouseShortcutButton { MouseShortcutButton() }
+    func updateNSView(_ view: MouseShortcutButton, context: Context) { view.refresh() }
+}
+final class MouseShortcutButton: NSButton {
+    static var isRecording = false
+    override init(frame: NSRect) {
+        super.init(frame: frame); isBordered = false; target = self; action = #selector(begin); refresh()
+    }
+    convenience init() { self.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError() }
+    @objc private func begin() { Self.isRecording = true; title = "Click a mouse button"; window?.makeFirstResponder(self) }
+    override var acceptsFirstResponder: Bool { true }
+    override func otherMouseDown(with event: NSEvent) { guard Self.isRecording else { super.otherMouseDown(with: event); return }; UserDefaults.standard.set(event.buttonNumber, forKey: "mouseShortcut"); Self.isRecording = false; refresh(); window?.makeFirstResponder(nil) }
+    override func resignFirstResponder() -> Bool { Self.isRecording = false; refresh(); return super.resignFirstResponder() }
+    func refresh() { guard !Self.isRecording else { return }; let value = UserDefaults.standard.object(forKey: "mouseShortcut") as? Int ?? -1; title = value < 0 ? "Record shortcut" : "Mouse \(value + 1)"; font = .systemFont(ofSize: 12, weight: .medium); contentTintColor = .secondaryLabelColor }
+}

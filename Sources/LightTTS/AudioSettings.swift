@@ -2,6 +2,7 @@ import AppKit
 import CoreAudio
 import AudioToolbox
 import CoreAudioTapKit
+import IOKit.hidsystem
 
 /// Applies input and output settings for the lifetime of one recording.
 final class AudioSettings {
@@ -9,7 +10,7 @@ final class AudioSettings {
     private var previousVolume: Float32?
     private var changedVolume: Float32?
     private let pauseSession: MediaPauseSession
-    init(media: any MediaControlling = AppleScriptMediaController()) {
+    init(media: any MediaControlling = SystemMediaController()) {
         pauseSession = MediaPauseSession(controller: (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty ? media : NoopMediaController())
     }
     private let muffleQueue = DispatchQueue(label: "com.lighttts.muffle")
@@ -110,28 +111,21 @@ private final class LowPassProcessor: AudioProcessor {
     func process(_ samples: UnsafeMutablePointer<Float>, frameCount: Int, channelCount: Int) { filter.process(samples, frameCount: frameCount, channelCount: channelCount) }
 }
 
-private struct AppleScriptMediaController: MediaControlling {
-    func pausePlaying() throws -> [String] {
-        var paused: [String] = []
-        for (bundle, app) in [("com.apple.Music", "Music"), ("com.spotify.client", "Spotify")] where !NSRunningApplication.runningApplications(withBundleIdentifier: bundle).isEmpty {
-            var error: NSDictionary?
-            let playing = NSAppleScript(source: "tell application \"\(app)\" to (player state is playing)")?.executeAndReturnError(&error).booleanValue ?? false
-            if let error { resume(paused); throw NSError(domain: "LightTTS.Media", code: (error[NSAppleScript.errorNumber] as? Int) ?? -1, userInfo: [NSLocalizedDescriptionKey: (error[NSAppleScript.errorMessage] as? String) ?? "Automation access was denied."]) }
-            if playing {
-                _ = NSAppleScript(source: "tell application \"\(app)\" to pause")?.executeAndReturnError(&error)
-                if let error { resume(paused); throw NSError(domain: "LightTTS.Media", code: (error[NSAppleScript.errorNumber] as? Int) ?? -1, userInfo: [NSLocalizedDescriptionKey: (error[NSAppleScript.errorMessage] as? String) ?? "The player could not be paused."]) }
-                paused.append(app)
-            }
-        }
-        return paused
+private struct SystemMediaController: MediaControlling {
+    func pausePlaying() throws -> [String] { try ActivityGatedMediaController(isOutputRunning: outputIsRunning, toggle: sendMediaKey).pausePlaying() }
+    func resume(_ players: [String]) { ActivityGatedMediaController(isOutputRunning: outputIsRunning, toggle: sendMediaKey).resume(players) }
+    private func outputIsRunning() -> Bool {
+        var property = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var device: AudioDeviceID = 0; var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &property, 0, nil, &size, &device) == noErr else { return false }
+        property = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var running: UInt32 = 0; size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(device, &property, 0, nil, &size, &running) == noErr && running != 0
     }
-    func resume(_ players: [String]) {
-        for app in players {
-            let bundle = app == "Music" ? "com.apple.Music" : "com.spotify.client"
-            guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundle).isEmpty else { continue }
-            var error: NSDictionary?
-            let paused = NSAppleScript(source: "tell application \"\(app)\" to (player state is paused)")?.executeAndReturnError(&error).booleanValue ?? false
-            if paused, error == nil { _ = NSAppleScript(source: "tell application \"\(app)\" to play")?.executeAndReturnError(&error) }
+    private func sendMediaKey() {
+        for state in [0xA, 0xB] {
+            let data = (Int(NX_KEYTYPE_PLAY) << 16) | (state << 8)
+            NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, subtype: 8, data1: data, data2: -1)?.cgEvent?.post(tap: .cghidEventTap)
         }
     }
 }

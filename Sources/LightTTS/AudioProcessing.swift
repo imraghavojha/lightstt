@@ -1,6 +1,35 @@
 import Foundation
 
+struct RecordingSegment: Codable, Hashable { let start: Double; let end: Double }
+
 enum AudioProcessing {
+    static func waveform(_ samples: [Float], bins: Int = 48) -> [Float] {
+        guard !samples.isEmpty, bins > 0 else { return [] }
+        return (0..<bins).map { bin in
+            let start = bin * samples.count / bins, end = max(start + 1, (bin + 1) * samples.count / bins)
+            guard start < samples.count else { return 0 }
+            let slice = samples[start..<min(end, samples.count)]
+            return min(1, sqrt(slice.reduce(Float.zero) { $0 + $1 * $1 } / Float(slice.count)) * 8)
+        }
+    }
+    static func speechSegments(_ samples: [Float]) -> [RecordingSegment] {
+        let frameSize = 320
+        guard !samples.isEmpty else { return [] }
+        let count = (samples.count + frameSize - 1) / frameSize
+        var kept = [Bool](repeating: false, count: count)
+        for frame in 0..<count {
+            let start = frame * frameSize, end = min(start + frameSize, samples.count)
+            let energy = samples[start..<end].reduce(Float.zero) { $0 + $1 * $1 } / Float(end - start)
+            if energy > 0.0001 { for index in max(0, frame - 10)...min(count - 1, frame + 10) { kept[index] = true } }
+        }
+        var ranges: [RecordingSegment] = []; var start: Int?
+        for frame in 0...count {
+            let active = frame < count && kept[frame]
+            if active && start == nil { start = frame }
+            if !active, let first = start { ranges.append(RecordingSegment(start: Double(first * frameSize) / 16000, end: Double(min(frame * frameSize, samples.count)) / 16000)); start = nil }
+        }
+        return ranges
+    }
     static func apply(_ samples: [Float], removeSilence: Bool, normalize: Bool) -> [Float] {
         guard !samples.isEmpty else { return samples }
         var result = samples
