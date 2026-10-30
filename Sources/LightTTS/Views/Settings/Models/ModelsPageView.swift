@@ -58,7 +58,7 @@ struct ModelsPageView: View {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Search models", text: $ui.query).textFieldStyle(.plain)
                         if !ui.query.isEmpty { Button { ui.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).help("Clear search") }
-                    }.font(.system(size: 13)).padding(.horizontal, 10).frame(width: 220, height: 28).background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().stroke(Color.primary.opacity(0.14), lineWidth: 0.5)).overlay(Capsule().stroke(Color.white.opacity(colorScheme == .light ? 0.4 : 0.08), lineWidth: 0.5).padding(1))
+                    }.font(.system(size: 13)).padding(.horizontal, 10).frame(width: 220, height: 28).background(colorScheme == .dark ? Color(red: 74/255, green: 76/255, blue: 79/255) : Color(red: 249/255, green: 249/255, blue: 249/255), in: Capsule()).overlay(Capsule().stroke(Color.primary.opacity(0.14), lineWidth: 0.5)).overlay(Capsule().stroke(Color.white.opacity(colorScheme == .light ? 0.65 : 0.10), lineWidth: 0.5).padding(1))
                 } else { Button { ui.searching = true } label: { Image(systemName: "magnifyingglass") }.buttonStyle(CircleButton()).help("Search") }
                 Menu { Toggle("Downloaded only", isOn: $ui.installedOnly) } label: { toolbarIcon("line.3.horizontal.decrease") }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.07), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)).help("Filters")
                 Menu { Button("Add cloud model…") { ui.cloud = true }; Button("Add local model…") { ui.custom = true } } label: { Image(nsImage: keyPlusImage) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.07), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)).help("Bring your own key")
@@ -72,7 +72,7 @@ struct ModelsPageView: View {
             if let model = ui.detail {
                 detailView(model).frame(width: 400).frame(maxHeight: .infinity)
                     .background(LinearGradient(colors: colorScheme == .dark ? [Color(red: 43/255, green: 49/255, blue: 57/255), Color(red: 35/255, green: 43/255, blue: 52/255)] : [Color(red: 235/255, green: 237/255, blue: 240/255), Color(red: 225/255, green: 229/255, blue: 234/255)], startPoint: .top, endPoint: .bottom))
-                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.14), radius: 12, x: -5, y: 0)
+                    .background(alignment: .leading) { Rectangle().fill(Color.black.opacity(colorScheme == .dark ? 0.3 : 0.14)).frame(width: 1).shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.14), radius: 12, x: -5).offset(x: -1) }
             }
         }
         .task { await ModelStore.refreshAppleStatus(); controller.objectWillChange.send() }
@@ -84,7 +84,7 @@ struct ModelsPageView: View {
     private var keyPlusImage: NSImage {
         let image = NSImage(contentsOf: Bundle.module.url(forResource: "key-plus", withExtension: "png")!)!
         image.isTemplate = true
-        image.size = NSSize(width: 16, height: 16)
+        image.size = NSSize(width: 20, height: 20)
         return image
     }
     private func toolbarIcon(_ name: String, plus: Bool = false) -> some View {
@@ -104,7 +104,7 @@ struct ModelsPageView: View {
                     sortHeader("Type").frame(width: compact ? 30 : 42, alignment: .leading)
                     sortHeader("Speed / Accuracy").lineLimit(1).minimumScaleFactor(0.75).frame(width: compact ? 85 : 110, alignment: .leading)
                     sortHeader("Cloud/Offline").frame(width: 90, alignment: .trailing)
-                }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.leading, 56).padding(.trailing, compact ? 18 : 28).padding(.top, 20).padding(.bottom, 8)
+                }.font(.system(size: 11, weight: .medium)).foregroundStyle(colorScheme == .dark ? Color(red: 118/255, green: 120/255, blue: 123/255) : Color(red: 76/255, green: 76/255, blue: 76/255)).padding(.leading, 56).padding(.trailing, compact ? 18 : 28).padding(.top, 20).padding(.bottom, 8)
                 ScrollView { LazyVStack(spacing: 0) { ForEach(visible) { model in
                     HStack(spacing: 8) {
                         Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(Color.secondary).frame(width: 24) }.buttonStyle(.plain)
@@ -135,10 +135,10 @@ struct ModelsPageView: View {
     private func detailView(_ model: Model) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
-                Button { ui.detail = nil } label: { Image(systemName: "chevron.left").font(.system(size: 12)) }.buttonStyle(.plain).frame(width: 20, height: 28)
+                Button { ui.detail = nil } label: { Image(systemName: "chevron.left").font(.system(size: 12)) }.buttonStyle(.plain).frame(width: 20, height: 28).offset(y: -4)
                 Spacer(); provider(model).offset(y: -8)
-                VStack(alignment: .leading, spacing: 1) { Text(displayName(model)).font(.system(size: 13, weight: .bold)); Text(subtitle(model)).font(.system(size: 10)).foregroundStyle(.secondary) }.offset(y: -8)
-                Spacer(); Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(.secondary) }.buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 1) { Text(displayName(model)).font(.system(size: 13, weight: .bold)); Text(subtitle(model)).font(.system(size: 10)).foregroundStyle(.secondary) }.offset(y: -5)
+                Spacer(); Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(.secondary) }.buttonStyle(.plain).offset(y: -4)
             }
             Text(engineDescription(model)).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 0) {
@@ -163,7 +163,8 @@ struct ModelsPageView: View {
     private func specs(_ model: Model) -> some View {
         HStack(spacing: 5) { ForEach(["bolt.fill", "translate", "character.book.closed.fill", "person.2.fill", "globe.americas.fill"], id: \.self) { symbol in
             let active = (symbol == "translate" && ["whisper-tiny", "whisper-medium"].contains(model.id)) || (symbol == "character.book.closed.fill" && ["whisper-medium", "whisper-large-v3-turbo"].contains(model.id))
-            Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(active ? (symbol == "translate" ? Color.blue : Color.purple) : Color.secondary.opacity(0.6)).frame(width: 24, height: 19).background(active ? (symbol == "translate" ? Color.blue.opacity(0.15) : Color.purple.opacity(0.15)) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5))
+            let hue = symbol == "translate" ? Color(red: 75/255, green: 165/255, blue: 207/255) : Color(red: 119/255, green: 91/255, blue: 210/255)
+            Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(active ? hue : Color.secondary.opacity(0.6)).frame(width: 24, height: 19).background(active ? hue.opacity(colorScheme == .dark ? 0.10 : 0.08) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5))
         } }
     }
     private func subtitle(_ model: Model) -> String { switch model.id { case "whisper-large-v3-turbo": return "Superwhisper Ultra V3 Turbo"; case "whisper-medium": return "Superwhisper Pro"; case "whisper-tiny": return "Superwhisper Fast"; default: return providerName(model) } }

@@ -56,15 +56,15 @@ struct SettingsView: View {
         .overlay {
             if let model = dialog.deleting {
                 ZStack {
-                    Color.black.opacity(0.28).ignoresSafeArea()
+                    Color.black.opacity(colorScheme == .dark ? 0.48 : 0.50).ignoresSafeArea()
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Delete \(alertName(model))").font(.system(size: 13, weight: .bold))
-                        Text(model.engine == "apple" ? "LightTTS will forget this selection; macOS manages the speech assets." : model.engine == "cloud" ? "The model and its API key will be removed." : "Are you sure you want to delete this model?").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(model.engine == "apple" ? "LightTTS will forget this selection; macOS manages the speech assets." : model.engine == "cloud" ? "The model and its API key will be removed." : "Are you sure you want to delete this model?").font(.system(size: 13)).foregroundStyle(.secondary)
                         HStack(spacing: 8) {
                             Button("Cancel") { dialog.deleting = nil }.keyboardShortcut(.cancelAction).buttonStyle(AlertButton(destructive: false))
                             Button("Delete", role: .destructive) { do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }; dialog.deleting = nil }.buttonStyle(AlertButton(destructive: true))
                         }
-                    }.padding(20).frame(width: 280).background(colorScheme == .dark ? Color(red: 54/255, green: 58/255, blue: 65/255) : Color(red: 231/255, green: 235/255, blue: 240/255), in: RoundedRectangle(cornerRadius: 22)).shadow(radius: 18)
+                    }.padding(20).frame(width: 260).background(colorScheme == .dark ? Color(red: 35/255, green: 37/255, blue: 40/255) : Color(red: 176/255, green: 179/255, blue: 182/255), in: RoundedRectangle(cornerRadius: 34)).shadow(radius: 18)
                 }
             }
         }.onChange(of: selectedModel) { _ in controller.warmSelected() }
@@ -73,7 +73,8 @@ struct SettingsView: View {
 
 private struct AlertButton: ButtonStyle {
     let destructive: Bool
+    @Environment(\.colorScheme) private var colorScheme
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 13)).foregroundStyle(destructive ? Color.red : Color.primary).frame(maxWidth: .infinity).frame(height: 30).background(destructive ? Color.red.opacity(configuration.isPressed ? 0.3 : 0.2) : Color.primary.opacity(configuration.isPressed ? 0.2 : 0.12), in: Capsule())
+        configuration.label.font(.system(size: 13, weight: .semibold)).foregroundStyle(destructive ? Color.red : Color.primary).frame(maxWidth: .infinity).frame(height: 28).background(destructive ? Color.red.opacity(configuration.isPressed ? 0.3 : (colorScheme == .dark ? 0.18 : 0.14)) : Color.primary.opacity(configuration.isPressed ? 0.2 : 0.12), in: Capsule())
     }
 }
