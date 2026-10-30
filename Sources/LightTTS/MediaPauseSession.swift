@@ -34,7 +34,7 @@ final class OutputVolumeSession {
     }
     func end() {
         let current = Dictionary(uniqueKeysWithValues: controller.volumes())
-        for entry in previous where current[entry.channel] == entry.applied { controller.setVolume(entry.original, channel: entry.channel) }
+        for entry in previous where current[entry.channel].map({ abs($0 - entry.applied) < 0.02 }) == true { controller.setVolume(entry.original, channel: entry.channel) }
         previous = []
     }
 }

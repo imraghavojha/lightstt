@@ -70,3 +70,10 @@ print("Output volume restoration checks passed")
 let changedOutput = FakeVolume(), changedSession = OutputVolumeSession(controller: changedOutput)
 changedSession.begin(factor: 0.3); changedOutput.values[1] = 0.5; changedSession.end()
 precondition(changedOutput.values[1] == 0.5 && changedOutput.values[2] == 0.4)
+let quantizedOutput = FakeVolume(), quantizedSession = OutputVolumeSession(controller: quantizedOutput)
+quantizedSession.begin(factor: 0.3)
+quantizedOutput.values[1] = 0.23 // Device readback differs from requested 0.24.
+quantizedOutput.values[2] = 0.15 // A larger user adjustment must be preserved.
+quantizedSession.end()
+precondition(quantizedOutput.values[1] == 0.8 && quantizedOutput.values[2] == 0.15)
+print("Quantized output restoration checks passed")

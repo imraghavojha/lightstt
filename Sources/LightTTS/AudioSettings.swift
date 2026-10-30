@@ -129,23 +129,19 @@ private struct SystemMediaController: MediaControlling {
     private typealias IsPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (Bool) -> Void) -> Void
     private typealias GetClient = @convention(c) (DispatchQueue, @escaping @convention(block) (UnsafeRawPointer?) -> Void) -> Void
     private typealias GetBundle = @convention(c) (UnsafeRawPointer) -> Unmanaged<CFString>?
-    private typealias GetPID = @convention(c) (UnsafeRawPointer) -> Int32
     private typealias SendCommand = @convention(c) (UInt32, CFDictionary?) -> Bool
 
     private func target() -> String? {
         guard let handle = Self.framework,
               let querySymbol = dlsym(handle, "MRMediaRemoteGetNowPlayingClient"),
-              let bundleSymbol = dlsym(handle, "MRNowPlayingClientGetBundleIdentifier"),
-              let pidSymbol = dlsym(handle, "MRNowPlayingClientGetProcessIdentifier") else { return nil }
+              let bundleSymbol = dlsym(handle, "MRNowPlayingClientGetBundleIdentifier") else { return nil }
         let query = unsafeBitCast(querySymbol, to: GetClient.self)
         let bundle = unsafeBitCast(bundleSymbol, to: GetBundle.self)
-        let pid = unsafeBitCast(pidSymbol, to: GetPID.self)
         let semaphore = DispatchSemaphore(value: 0), lock = NSLock()
         var identity: String?
         query(DispatchQueue.global()) { client in
             if let client, let identifier = bundle(client)?.takeUnretainedValue() as String?, !identifier.isEmpty {
-                let process = pid(client)
-                if process > 0 { lock.lock(); identity = "\(identifier):\(process)"; lock.unlock() }
+                lock.lock(); identity = identifier; lock.unlock()
             }
             semaphore.signal()
         }
@@ -170,7 +166,10 @@ private struct SystemMediaController: MediaControlling {
         return [identity]
     }
     func resume(_ players: [String]) {
-        guard let identity = players.first, target() == identity, isPlaying() == false, target() == identity else { return }
+        guard let identity = players.first else { return }
+        // MediaRemote may report the old playing state briefly after a pause.
+        Thread.sleep(forTimeInterval: 0.2)
+        guard target() == identity, isPlaying() == false, target() == identity else { return }
         _ = send(0)
     }
 }
