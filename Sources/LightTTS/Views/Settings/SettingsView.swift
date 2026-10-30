@@ -325,7 +325,7 @@ private struct SettingsPopup: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSPopUpButton {
         let button = NSPopUpButton(frame: .zero, pullsDown: false)
-        button.controlSize = .regular
+        button.controlSize = .large
         button.target = context.coordinator; button.action = #selector(Coordinator.changed(_:))
         return button
     }
