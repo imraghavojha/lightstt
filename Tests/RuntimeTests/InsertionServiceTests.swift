@@ -7,8 +7,11 @@ private final class FakeTarget: TextTarget, @unchecked Sendable {
     var calls: [String] = []
     var error: FocusError?
     var ranOnMainThread: Bool?
-    func insert(_ text: String) throws { try record("insert: \(text)") }
-    func type(_ text: String) throws { try record("type: \(text)") }
+    var restores: [Bool] = []
+    func paste(_ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool) throws {
+        restores.append(restoreClipboard)
+        try record("paste: \(text)")
+    }
     func sendReturn() throws { try record("return") }
     private func record(_ call: String) throws {
         ranOnMainThread = Thread.isMainThread
@@ -126,9 +129,10 @@ final class InsertionServiceTests: XCTestCase {
                 "hello", to: service.captureAtStop(), autoPaste: true
             ) { true }
             XCTAssertEqual(outcome, InsertionOutcome(delivery: .delivered))
-            XCTAssertEqual(target.calls, [typing ? "type: hello" : "insert: hello", "return"])
+            XCTAssertEqual(target.calls, ["paste: hello", "return"])
             XCTAssertEqual(target.ranOnMainThread, false)
-            XCTAssertEqual(clipboard.writes.count, typing ? 0 : 1)
+            XCTAssertTrue(clipboard.writes.isEmpty)
+            XCTAssertEqual(target.restores, [typing])
         }
     }
 
@@ -139,7 +143,7 @@ final class InsertionServiceTests: XCTestCase {
             result: FocusResult(target: target, disposition: .editable), clipboard: clipboard,
             send: true)
         _ = await service.deliver("hello", to: service.captureAtStop(), autoPaste: true) { true }
-        XCTAssertEqual(target.calls, ["insert: hello"])
+        XCTAssertEqual(target.calls, ["paste: hello"])
         target.error = .secure
         let outcome = await service.deliver("hello", to: service.captureAtStop(), autoPaste: true) {
             true
@@ -181,7 +185,7 @@ final class InsertionServiceTests: XCTestCase {
             }
             XCTAssertEqual(outcome.delivery, .skipped)
             XCTAssertEqual(checks, staleCheck)
-            XCTAssertEqual(target.calls, staleCheck == 3 ? [] : ["insert: hello"])
+            XCTAssertEqual(target.calls, staleCheck == 3 ? [] : ["paste: hello"])
             XCTAssertTrue(clipboard.writes.isEmpty)
         }
     }
@@ -213,8 +217,39 @@ final class InsertionServiceTests: XCTestCase {
             return true
         }
         XCTAssertEqual(outcome.delivery, .delivered)
-        XCTAssertEqual(clipboard.writes.first?.1, false)
-        XCTAssertEqual(target.calls, ["insert: hello"])
+        XCTAssertTrue(clipboard.writes.isEmpty)
+        XCTAssertEqual(target.calls, ["paste: hello"])
+    }
+
+    func testFocusPolicyAndRestoration() async {
+        XCTAssertEqual(
+            focusDisposition(role: nil, subrole: nil, secureInput: false, isOpaqueApp: true),
+            .uncertain)
+        XCTAssertEqual(
+            focusDisposition(role: "AXButton", subrole: nil, secureInput: false, isOpaqueApp: true),
+            .uncertain)
+        XCTAssertEqual(
+            focusDisposition(role: nil, subrole: nil, secureInput: false, isFinder: true),
+            .unavailable)
+        XCTAssertEqual(
+            focusDisposition(role: "AXTextField", subrole: nil, secureInput: false, isOwnApp: true),
+            .unavailable)
+        XCTAssertEqual(
+            focusDisposition(role: "AXTextField", subrole: "AXSecureTextField", secureInput: false),
+            .secure)
+        XCTAssertFalse(shouldRestoreClipboard(disposition: .uncertain, preference: true))
+        XCTAssertFalse(shouldRestoreClipboard(disposition: .editable, preference: false))
+        XCTAssertTrue(shouldRestoreClipboard(disposition: .editable, preference: true))
+        let target = FakeTarget()
+        let clipboard = FakeClipboard()
+        let service = makeService(
+            result: FocusResult(target: target, disposition: .uncertain), clipboard: clipboard)
+        let outcome = await service.deliver("hello", to: service.captureAtStop(), autoPaste: true) {
+            true
+        }
+        XCTAssertEqual(outcome.delivery, .delivered)
+        XCTAssertEqual(target.calls, ["paste: hello"])
+        XCTAssertEqual(target.restores, [false])
     }
 
     func testClipboardMarkerTypes() async {

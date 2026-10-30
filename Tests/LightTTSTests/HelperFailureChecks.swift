@@ -15,7 +15,7 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         precondition(focusDisposition(role: "AXSecureTextField", subrole: nil, secureInput: false) == .secure)
         precondition(focusDisposition(role: "AXTextArea", subrole: nil, secureInput: true) == .secure)
         precondition(focusDisposition(role: "AXButton", subrole: nil, secureInput: false) == .unavailable)
-        precondition(focusDisposition(role: nil, subrole: nil, secureInput: false) == .unavailable)
+        precondition(focusDisposition(role: nil, subrole: nil, secureInput: false) == .uncertain)
         precondition(focusDisposition(role: "AXTextArea", subrole: nil, secureInput: false) == .editable)
         var chunks: [String] = []
         do {

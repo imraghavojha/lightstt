@@ -1,7 +1,7 @@
 import Foundation
 
 public enum FocusDisposition: Sendable {
-    case editable, secure, unavailable
+    case editable, uncertain, secure, unavailable
 }
 public enum FocusError: LocalizedError {
     case secure, unavailable, changed, modifiersHeld, eventCreationFailed
@@ -16,16 +16,34 @@ public enum FocusError: LocalizedError {
     }
 }
 
-public func focusDisposition(role: String?, subrole: String?, secureInput: Bool) -> FocusDisposition
-{
+public func focusDisposition(
+    role: String?, subrole: String?, secureInput: Bool, isOwnApp: Bool = false,
+    isFinder: Bool = false, isOpaqueApp: Bool = false
+) -> FocusDisposition {
     if secureInput || role == "AXSecureTextField" || subrole == "AXSecureTextField" {
         return .secure
     }
-    guard let role, ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(role)
-    else {
+    if isOwnApp { return .unavailable }
+    if let role, ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(role) {
+        return .editable
+    }
+    if isFinder && (role == nil || ["AXWindow", "AXScrollArea", "AXGroup"].contains(role!)) {
         return .unavailable
     }
-    return .editable
+    if !isOpaqueApp, let role,
+        [
+            "AXButton", "AXCheckBox", "AXRadioButton", "AXImage", "AXStaticText", "AXTable",
+            "AXOutline", "AXList", "AXBrowser",
+        ].contains(role)
+    {
+        return .unavailable
+    }
+    return .uncertain
+}
+
+public func shouldRestoreClipboard(disposition: FocusDisposition, preference: Bool) -> Bool {
+    if case .editable = disposition { return preference }
+    return false
 }
 
 public func typeInChunks(

@@ -425,20 +425,22 @@ import IOKit.ps
                     } else if let target = capture.target, case .unavailable = target.stopDisposition {
                         copied = true
                     } else if let target = capture.target {
-                        let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
+                        let restore = shouldRestoreClipboard(disposition: target.stopDisposition, preference: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true)
+                        let history = UserDefaults.standard.object(forKey: "clipboardHistory") as? Bool ?? true
                         let send = UserDefaults.standard.bool(forKey: "sendOnShift")
                         let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
                         do {
                             LaunchTrace.mark("paste-start")
                             try await Task.detached(priority: .userInitiated) {
-                                try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
+                                try target.paste(text, restoreClipboard: restore, allowClipboardHistory: history)
+                                if send && shiftHeld { try target.sendReturn() }
                             }.value
                             LaunchTrace.mark("paste-end")
                         } catch FocusError.secure { copied = true }
                         catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
                     } else { copied = true }
                 }
-                if copied || pasteWarning != nil || shouldCopyTranscript(autoPaste: sessionAutoPaste, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) {
+                if copied || pasteWarning != nil {
                     writeTranscriptToClipboard(text)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }

@@ -51,10 +51,12 @@ public final class InsertionService: InsertionServicing {
             do {
                 let started = try await Task.detached(priority: .userInitiated) {
                     guard await isCurrent() else { return false }
-                    try performTextInput(
-                        text, simulateTyping: settings.simulateTyping, sendOnShift: send,
-                        shiftHeld: true, insert: target.insert, type: target.type,
-                        sendReturn: target.sendReturn)
+                    try target.paste(
+                        text,
+                        restoreClipboard: shouldRestoreClipboard(
+                            disposition: result.disposition, preference: settings.restoreClipboard),
+                        allowClipboardHistory: settings.allowClipboardHistory)
+                    if send { try target.sendReturn() }
                     return true
                 }.value
                 guard started else { return InsertionOutcome(delivery: .skipped) }
@@ -70,7 +72,7 @@ public final class InsertionService: InsertionServicing {
 
         guard isCurrent() else { return InsertionOutcome(delivery: .skipped) }
         let clipboardSettings = options()
-        if copied || warning != nil || !clipboardSettings.restoreClipboard {
+        if copied || warning != nil {
             clipboard.write(text, allowClipboardHistory: clipboardSettings.allowClipboardHistory)
         }
         return InsertionOutcome(

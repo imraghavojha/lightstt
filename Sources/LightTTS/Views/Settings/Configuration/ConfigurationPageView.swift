@@ -24,7 +24,6 @@ struct ConfigurationPageView: View {
     @AppStorage("restoreClipboard") var restoreClipboard = true
     @AppStorage("autoPaste") var pasteResult = true
     @AppStorage("sendOnShift") var sendOnShift = false
-    @AppStorage("simulateTyping") var simulateTyping = false
     @AppStorage("removeSilence") var removeSilence = false
     @AppStorage("normalizeAudio") var normalizeAudio = false
     @AppStorage("historyRetentionDays") var retention = 0
