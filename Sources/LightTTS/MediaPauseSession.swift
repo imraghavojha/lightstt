@@ -1,5 +1,27 @@
 import Foundation
 
+/// A resume is safe only after observing our pause and no subsequent player change.
+final class MediaIntentTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var awaitingPause = false
+    private var valid = false
+    func begin() { lock.lock(); awaitingPause = true; valid = true; lock.unlock() }
+    func playbackChanged(_ playing: Bool?) {
+        lock.lock(); defer { lock.unlock() }
+        guard valid else { return }
+        if awaitingPause && playing == false { awaitingPause = false }
+        else { valid = false }
+    }
+    func playerChanged() { lock.lock(); valid = false; lock.unlock() }
+    func finish(_ action: () -> Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let allowed = valid && !awaitingPause
+        valid = false; awaitingPause = false
+        return allowed && action()
+    }
+    func cancel() { lock.lock(); valid = false; awaitingPause = false; lock.unlock() }
+}
+
 protocol MediaControlling {
     func pausePlaying() throws -> [String]
     func resume(_ players: [String])
@@ -48,7 +70,7 @@ final class MediaGate: @unchecked Sendable {
     private var operation = 0
     func setOperation(_ token: Int) { lock.lock(); operation = token; lock.unlock() }
     func start() -> Int { lock.lock(); defer { lock.unlock() }; generation += 1; active = true; return generation }
-    func stop() { lock.lock(); generation += 1; active = false; lock.unlock() }
+    func stop() { lock.lock(); if active { generation += 1; active = false }; lock.unlock() }
     func isCurrent(_ token: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == token }
     func ifActive(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == operation && action() }
     func ifStopped(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return !active && generation == operation + 1 && action() }
