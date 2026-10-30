@@ -29,19 +29,23 @@ struct LibraryPageView: View {
     }
     private var header: some View {
         HStack(spacing: 10) {
-            Button { controller.leaveLibrary() } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)) }.buttonStyle(.plain)
+            Button { controller.leaveLibrary() } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.plain)
             Text("Library").font(.system(size: 13, weight: .bold)); Spacer()
             if controller.historySearchVisible {
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass")
                     TextField("Search history", text: $controller.historySearch).textFieldStyle(.plain)
                     Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
-                }.font(.system(size: 13)).padding(.horizontal, 8).frame(width: 220, height: 28).background(Color.primary.opacity(0.09), in: Capsule())
+                }.font(.system(size: 13)).padding(.horizontal, 8).frame(width: 220, height: 28).background(headerChrome, in: Capsule()).overlay(Capsule().stroke(headerEdge, lineWidth: 0.5))
             } else {
-                Button { controller.historySearchVisible = true } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)) }.buttonStyle(.plain).help("Search recordings")
+                Button { controller.historySearchVisible = true } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.plain).help("Search recordings")
             }
         }.padding(.leading, 12).padding(.trailing, 10).frame(height: 48)
     }
+    private var headerChrome: LinearGradient {
+        LinearGradient(colors: scheme == .dark ? [Color(white: 0.29), Color(white: 0.24)] : [Color.white, Color(white: 0.94)], startPoint: .top, endPoint: .bottom)
+    }
+    private var headerEdge: Color { scheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.15) }
     @ViewBuilder private var content: some View {
             if state.groups.isEmpty {
                 VStack { Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).padding(.top, 133); Spacer() }.frame(maxWidth: .infinity)
