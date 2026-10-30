@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/lighttts-check.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 swift build
-swift run core-checks
+swift test
 scripts/test-audio-processing.sh
 swiftc Sources/LightTTS/ModifierKeyState.swift scripts/test-modifier-state.swift -o "$tmp/modifier"
 "$tmp/modifier"
