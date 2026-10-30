@@ -149,7 +149,8 @@ struct ModelsPageView: View {
                         Image(systemName: "waveform").foregroundStyle(.secondary).frame(width: 24, height: 21).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5)).frame(width: compact ? 30 : 42, alignment: .leading)
                         ratings(model).frame(width: compact ? 85 : 110, alignment: .leading)
                         HStack(spacing: 6) {
-                            if controller.busyModel == model.id { Text("\(Int(controller.downloadProgress * 100))%").font(.system(size: 12, weight: .medium)); progressButton }
+                            if controller.busyModel == model.id && controller.modelOperation != nil { ProgressView().controlSize(.small) }
+                            else if controller.busyModel == model.id { ModelProgressView(progress: controller.modelProgress, cancel: controller.cancelDownload, detail: false) }
                             else if model.engine == "cloud" { Image(systemName: "cloud").foregroundStyle(.secondary); action(model) }
                             else { Text(size(model)).font(.system(size: 12, weight: .medium)); action(model) }
                         }.frame(width: 90, alignment: .trailing)
@@ -162,11 +163,6 @@ struct ModelsPageView: View {
     private func compare<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult { a == b ? .orderedSame : (a < b ? .orderedAscending : .orderedDescending) }
     private func sortHeader(_ title: String) -> some View {
         Button { if ui.sortColumn == title { ui.ascending.toggle() } else { ui.sortColumn = title; ui.ascending = true } } label: { HStack(spacing: 3) { Text(title); if ui.sortColumn == title || (ui.sortColumn.isEmpty && title == "Model name") { Image(systemName: ui.ascending ? "chevron.up" : "chevron.down").font(.system(size: 8)) } } }.buttonStyle(.plain)
-    }
-    private var progressButton: some View {
-        Button { controller.cancelDownload() } label: {
-            ZStack { Circle().stroke(Color.primary.opacity(0.18), lineWidth: 1.5); Circle().fill(Color.primary.opacity(0.08)).padding(3); Circle().trim(from: 0, to: min(max(controller.downloadProgress, 0), 1)).stroke(Color.primary.opacity(0.75), style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).rotationEffect(.degrees(-90)); Image(systemName: "xmark").font(.system(size: 8, weight: .semibold)) }.frame(width: 22, height: 22)
-        }.buttonStyle(.plain).help("Cancel download")
     }
     private func detailView(_ model: Model) -> some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -190,8 +186,9 @@ struct ModelsPageView: View {
             HStack(spacing: 8) {
                 if ui.installed?.contains(model.id) == true {
                     Button(selectedModel == model.id ? "Selected" : "Use in all modes") { selectedModel = model.id; controller.reloadSelectedModel() }.buttonStyle(FooterButton()).disabled(selectedModel == model.id)
-                    Button { deleting = model } label: { Image(systemName: "trash.fill").frame(width: 28, height: 28).background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain)
-                } else if controller.busyModel == model.id { Text("Downloading \(Int(controller.downloadProgress * 100))%"); Spacer(); progressButton }
+                    Button { deleting = model } label: { Image(systemName: "trash.fill").frame(width: 28, height: 28).background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain).disabled(controller.busyModel != nil)
+                } else if controller.busyModel == model.id && controller.modelOperation != nil { ProgressView().controlSize(.small) }
+                else if controller.busyModel == model.id { ModelProgressView(progress: controller.modelProgress, cancel: controller.cancelDownload, detail: true) }
                 else { Button("Download · \(size(model))") { controller.download(model) }.buttonStyle(FooterButton()).disabled(controller.busyModel != nil || ui.installed == nil) }
             }
         }.font(.system(size: 12)).padding(16)
@@ -336,5 +333,21 @@ private struct CanaryLanguagePicker: View {
         Picker("Transcription language", selection: $language) {
             ForEach(model.version == "nemo_canary" ? ["en", "es", "de", "fr"] : ["bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk"], id: \.self) { code in Text(Locale.current.localizedString(forLanguageCode: code) ?? code).tag(code) }
         }.onChange(of: language) { _ in controller.reloadSelectedModel() }
+    }
+}
+
+private struct ModelProgressView: View {
+    @ObservedObject var progress: ModelProgress
+    let cancel: () -> Void
+    let detail: Bool
+    var body: some View {
+        HStack {
+            Text(detail ? "Downloading \(Int(progress.value * 100))%" : "\(Int(progress.value * 100))%")
+                .font(.system(size: 12, weight: .medium))
+            if detail { Spacer() }
+            Button(action: cancel) {
+                ZStack { Circle().stroke(Color.primary.opacity(0.18), lineWidth: 1.5); Circle().fill(Color.primary.opacity(0.08)).padding(3); Circle().trim(from: 0, to: min(max(progress.value, 0), 1)).stroke(Color.primary.opacity(0.75), style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).rotationEffect(.degrees(-90)); Image(systemName: "xmark").font(.system(size: 8, weight: .semibold)) }.frame(width: 22, height: 22)
+            }.buttonStyle(.plain).help("Cancel download")
+        }
     }
 }

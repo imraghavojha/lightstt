@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RecordingView: View {
     @ObservedObject var controller: AppController
+    @ObservedObject private var level: RecordingLevel
+    init(controller: AppController) { self.controller = controller; self.level = controller.recordingLevel }
 
     var body: some View {
         let idle = controller.state == "idle"
@@ -10,7 +12,7 @@ struct RecordingView: View {
                 HStack(spacing: 2) {
                     ForEach(0..<6) { index in
                         Capsule().fill(.white)
-                            .frame(width: 2, height: max(2, 2 + CGFloat(controller.level) * [6, 10, 14, 14, 10, 6][index]))
+                            .frame(width: 2, height: max(2, 2 + CGFloat(level.value) * [6, 10, 14, 14, 10, 6][index]))
                     }
                 }.offset(x: -1)
             } else if controller.state == "processing" {
@@ -28,7 +30,7 @@ struct RecordingView: View {
         .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)
         .offset(y: idle ? 0 : -9.5)
         .animation(.easeOut(duration: 0.15), value: idle)
-        .animation(.easeOut(duration: 0.08), value: controller.level)
+        .animation(.easeOut(duration: 0.08), value: level.value)
         .frame(width: 240, height: 160)
         .accessibilityLabel(controller.state == "error" ? controller.message : controller.state.capitalized)
     }

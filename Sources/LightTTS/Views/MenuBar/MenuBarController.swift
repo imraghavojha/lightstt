@@ -8,7 +8,9 @@ import LightTTSCore
     private let status: NSStatusItem
     private let popover = NSPopover()
     private var window: NSWindow?
-    private var compactHost: NSViewController?
+    private var compactHost: NSHostingController<AnyView>?
+    private var settingsHost: NSHostingView<AnyView>?
+    private let compactData = CompactMenuData()
     private var previousApp: NSRunningApplication?
     private var openingSettings = false
 
@@ -23,6 +25,8 @@ import LightTTSCore
         popover.behavior = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" ? .applicationDefined : .transient
         popover.animates = false
         popover.delegate = self
+        NotificationCenter.default.addObserver(self, selector: #selector(applicationDidHide), name: NSApplication.didHideNotification, object: NSApp)
+        NotificationCenter.default.addObserver(self, selector: #selector(applicationDidUnhide), name: NSApplication.didUnhideNotification, object: NSApp)
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
             popover.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
         }
@@ -73,6 +77,7 @@ import LightTTSCore
     }
     private func showCompact() {
         guard let button = status.button else { return }
+        compactData.load(models: app.models)
         updateContent()
         if let appearance = NSApp.appearance { button.appearance = appearance }
         let frontmost = NSWorkspace.shared.frontmostApplication
@@ -87,13 +92,14 @@ import LightTTSCore
         popover.performClose(nil)
         openingSettings = false
         NSApp.activate(ignoringOtherApps: true)
-        if let window { if window.isMiniaturized { window.deminiaturize(nil) }; window.makeKeyAndOrderFront(nil) }
+        if let window { if !window.isVisible || window.isMiniaturized { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }; if window.isMiniaturized { window.deminiaturize(nil) }; window.makeKeyAndOrderFront(nil) }
         else {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
             w.standardWindowButton(.zoomButton)?.isHidden = true
             w.title = "LightTTS"; w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false; w.delegate = self; window = w
-            let host = NSHostingView(rootView: SettingsView(controller: app).ignoresSafeArea())
+            let host = NSHostingView(rootView: AnyView(SettingsView(controller: app).ignoresSafeArea()))
+            settingsHost = host
             host.sizingOptions = []; w.contentView = host
             let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
             if let frame = screen?.visibleFrame {
@@ -113,21 +119,28 @@ import LightTTSCore
         UITrace.end("settings-window")
     }
     func popoverDidClose(_ notification: Notification) {
+        compactHost?.rootView = AnyView(EmptyView())
         defer { previousApp = nil }
         guard !openingSettings, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
         previousApp?.activate()
     }
     private func updateContent() {
-        if let compactHost { popover.contentViewController = compactHost; return }
-        let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.openSettingsWindow() })
+        let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.openSettingsWindow() }, data: compactData)
+        let root: AnyView
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
-            let hosting = NSHostingController(rootView: view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
-            hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
-            compactHost = hosting; popover.contentViewController = hosting
-        } else {
-            let hosting = NSHostingController(rootView: view)
-            compactHost = hosting; popover.contentViewController = hosting
-        }
+            root = AnyView(view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
+        } else { root = AnyView(view) }
+        if let compactHost { compactHost.rootView = root; popover.contentViewController = compactHost; return }
+        let hosting = NSHostingController(rootView: root)
+        if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] { hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua) }
+        compactHost = hosting; popover.contentViewController = hosting
     }
-    func windowWillClose(_ notification: Notification) {}
+    @objc private func applicationDidHide() { compactHost?.rootView = AnyView(EmptyView()); settingsHost?.rootView = AnyView(EmptyView()) }
+    @objc private func applicationDidUnhide() {
+        if popover.isShown { compactData.load(models: app.models); updateContent() }
+        if let window, window.isVisible && !window.isMiniaturized { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }
+    }
+    func windowWillClose(_ notification: Notification) { settingsHost?.rootView = AnyView(EmptyView()) }
+    func windowDidMiniaturize(_ notification: Notification) { settingsHost?.rootView = AnyView(EmptyView()) }
+    func windowDidDeminiaturize(_ notification: Notification) { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }
 }

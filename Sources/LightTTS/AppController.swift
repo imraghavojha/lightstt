@@ -10,19 +10,21 @@ import ServiceManagement
 import Darwin
 
 
+@MainActor final class RecordingLevel: ObservableObject { @Published var value: Float = 0 }
+@MainActor final class ModelProgress: ObservableObject { @Published var value: Double = 0 }
+
 @MainActor final class AppController: NSObject, ObservableObject {
     @Published var state = "idle" { didSet { hotkey.setRecording(state == "starting" || state == "recording") } }
     @Published var settingsSelection = "Sound"
     private var previousSettingsSelection = "Sound"
-    @Published var level: Float = 0
+    let recordingLevel = RecordingLevel()
     @Published var started = Date()
     @Published var message = ""
     @Published var history: [HistoryEntry] = []
     @Published var historySearch = ""
     @Published var historySearchVisible = false
     @Published var selectedHistory: HistoryEntry?
-    @Published var hoveredHistoryID: UUID?
-    @Published var showAdvanced = false
+        @Published var showAdvanced = false
     @Published var playingHistoryID: UUID?
     @Published var historySegmented = false
     @Published var reprocessingHistoryID: UUID?
@@ -32,7 +34,8 @@ import Darwin
     @Published var loginEnabled = false
     @Published var models: [Model] = []
     @Published var busyModel: String?
-    @Published var downloadProgress: Double = 0
+    @Published var modelOperation: String?
+    let modelProgress = ModelProgress()
     var onCatalogReady: (() -> Void)?
     private var downloadTask: Task<Void, Never>?
     private var engine: (any TranscriptionEngine)?
@@ -269,7 +272,7 @@ import Darwin
         focus = nil
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
             do {
-                let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
+                let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.recordingLevel.value = value } }
                 try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
             } catch { fail(error.localizedDescription) }
             return
@@ -283,7 +286,7 @@ import Darwin
             }
             if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
                 do {
-                    let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
+                    let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.recordingLevel.value = value } }
                     try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
                 } catch { fail(error.localizedDescription) }
                 return
@@ -299,7 +302,7 @@ import Darwin
             guard current == generation, state == "starting" else { return }
             guard allowed else { fail("Microphone access is required. Enable it in System Settings."); return }
             do {
-                let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
+                let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.recordingLevel.value = value } }
                 let manageAudio = !isTestAudio || ProcessInfo.processInfo.environment["LIGHTTTS_TEST_VOLUME"] == "1"
                 if manageAudio { message = audioSettings.begin() ?? "" }
                 do { try capture.start() } catch { if manageAudio { audioSettings.end() }; throw error }
@@ -393,11 +396,11 @@ import Darwin
     func cancel() { audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide(); runPendingHistoryReprocess() }
 
     private func hideImmediately() {
-        level = 0; panel?.orderOut(nil); panel = nil
+        recordingLevel.value = 0; panel?.orderOut(nil); panel = nil
     }
 
     private func hide() {
-        state = "idle"; level = 0
+        state = "idle"; recordingLevel.value = 0
         scheduleEngineUnload()
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         else if let panel {
@@ -412,7 +415,7 @@ import Darwin
         }
     }
     func refreshRecordingWindow() { if state != "idle" || UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() } else { panel?.orderOut(nil) } }
-    func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; level = 0; showPanel() }
+    func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; recordingLevel.value = 0; showPanel() }
     private func dismissPanel() {
         panel?.orderOut(nil)
         panel = nil
@@ -447,7 +450,7 @@ import Darwin
     func fail(_ text: String) {
         audioSettings.end()
         generation += 1; processing?.cancel(); processing = nil
-        _ = audio?.stop(); audio = nil; testAudio = nil; focus = nil; level = 0
+        _ = audio?.stop(); audio = nil; testAudio = nil; focus = nil; recordingLevel.value = 0
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
         unloadEngine(); message = text; state = "error"; showPanel(); runPendingHistoryReprocess()
     }
@@ -546,18 +549,26 @@ import Darwin
         let panel = NSOpenPanel(); panel.canChooseDirectories = engine != "whisper"; panel.canChooseFiles = true; panel.allowsMultipleSelection = false
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard busyModel == nil else { message = "Wait for the current model operation to finish."; return }
         let id = "custom-" + UUID().uuidString
-        do {
-            var model = Model(id: id, name: url.lastPathComponent, engine: engine, version: version.isEmpty ? nil : version)
-            if engine == "whisper" { try ModelStore.importFile(url, id: id) }
-            else {
-                let isDirectory = (try url.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true
-                let source = isDirectory && !url.lastPathComponent.hasSuffix(".mlmodelc") ? url : url.deletingLastPathComponent()
-                if engine == "sherpa" { model.files = try SherpaModelFiles.requiredFiles(version).map { ModelFile(path: $0, url: source.appendingPathComponent($0), size: 0, sha256: "") } }
-                try ModelStore.importDirectory(source, model: model)
-            }
-            addCustom(model)
-        } catch { message = error.localizedDescription }
+        busyModel = id; modelOperation = "Importing model…"
+        Task {
+            do {
+                let model = try await Task.detached(priority: .userInitiated) { () throws -> Model in
+                    var model = Model(id: id, name: url.lastPathComponent, engine: engine, version: version.isEmpty ? nil : version)
+                    if engine == "whisper" { try ModelStore.importFile(url, id: id) }
+                    else {
+                        let isDirectory = (try url.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true
+                        let source = isDirectory && !url.lastPathComponent.hasSuffix(".mlmodelc") ? url : url.deletingLastPathComponent()
+                        if engine == "sherpa" { model.files = try SherpaModelFiles.requiredFiles(version).map { ModelFile(path: $0, url: source.appendingPathComponent($0), size: 0, sha256: "") } }
+                        try ModelStore.importDirectory(source, model: model)
+                    }
+                    return model
+                }.value
+                addCustom(model)
+            } catch { message = error.localizedDescription }
+            busyModel = nil; modelOperation = nil
+        }
     }
     func importRemoteModel(_ address: String, sha256: String) {
         let input = address.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -640,14 +651,17 @@ import Darwin
         if let data = try? JSONEncoder().encode(custom) { UserDefaults.standard.set(data, forKey: "customModels") }
     }
     func deleteModel(_ model: Model) {
-        do {
-            if ModelStore.exists(model) { try ModelStore.delete(model) }
-            if model.id.hasPrefix("custom-") { models.removeAll { $0.id == model.id }; let custom = models.filter { $0.id.hasPrefix("custom-") }; UserDefaults.standard.set(try JSONEncoder().encode(custom), forKey: "customModels") }
-            if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); unloadEngine() }
-            if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
-            objectWillChange.send()
-        } catch { message = error.localizedDescription }
-
+        guard busyModel == nil else { return }
+        busyModel = model.id; modelOperation = "Deleting model…"
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) { if ModelStore.exists(model) { try ModelStore.delete(model) } }.value
+                if model.id.hasPrefix("custom-") { models.removeAll { $0.id == model.id }; let custom = models.filter { $0.id.hasPrefix("custom-") }; UserDefaults.standard.set(try JSONEncoder().encode(custom), forKey: "customModels") }
+                if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); unloadEngine() }
+                if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
+            } catch { message = error.localizedDescription }
+            busyModel = nil; modelOperation = nil; objectWillChange.send()
+        }
     }
     func cancelDownload() { downloadTask?.cancel() }
 
@@ -655,9 +669,9 @@ import Darwin
 
     func download(_ model: Model) {
         guard busyModel == nil else { return }
-        busyModel = model.id; downloadProgress = 0
+        busyModel = model.id; modelProgress.value = 0
         downloadTask = Task {
-            do { try await ModelStore.download(model) { [weak self] value in Task { @MainActor in self?.downloadProgress = value } } }
+            do { try await ModelStore.download(model) { [weak self] value in Task { @MainActor in self?.modelProgress.value = value } } }
             catch is CancellationError { message = "Download canceled. You can resume it." }
             catch { message = error.localizedDescription }
             busyModel = nil; downloadTask = nil; objectWillChange.send()
