@@ -227,7 +227,7 @@ private struct ConfigurationPageView: View {
                     unavailableRow("Close after transcription")
                 }
                 advancedHeading("Voice model")
-                SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Unload the voice model after this period of inactivity") { SettingsPopup(selection: $modelIdleTimeout, options: [(60, "1 minute"), (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"), (1800, "30 minutes")], width: 125).frame(width: 125, height: 28).onChange(of: modelIdleTimeout) { _ in controller.refreshModelIdleTimeout() } } }
+                SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Unload the voice model after this period of inactivity") { NeutralSettingsPopup(selection: $modelIdleTimeout, options: [(60, "1 minute"), (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"), (1800, "30 minutes")], width: 125).frame(width: 125, height: 28).onChange(of: modelIdleTimeout) { _ in controller.refreshModelIdleTimeout() } } }
                 advancedHeading("Audio processing")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Silence removal", help: "Remove silence from recordings") { Toggle("", isOn: $removeSilence).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Silence removal")) }; PageRule()
@@ -248,7 +248,7 @@ private struct ConfigurationPageView: View {
                 advancedHeading("Text input")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Clipboard content", help: "Choose whether to restore the previous clipboard contents") {
-                        SettingsPopup(selection: Binding(get: { restoreClipboard ? 1 : 0 }, set: { restoreClipboard = $0 == 1 }), options: ["Keep result", "Restore previous"], width: 145).frame(width: 145, height: 28)
+                        NeutralSettingsPopup(selection: Binding(get: { restoreClipboard ? 1 : 0 }, set: { restoreClipboard = $0 == 1 }), options: [(0, "Keep result"), (1, "Restore previous")], width: 145).frame(width: 145, height: 28)
                     }; PageRule()
                     unavailableRow("Clipboard history"); PageRule()
                     ConfigurationApplicationRow(title: "Paste result text", help: "Paste the transcription into the focused app") { Toggle("", isOn: $pasteResult).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Paste result text")) }; PageRule()
@@ -306,8 +306,10 @@ private struct ThemeArtwork: View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
                 if mode == 0 {
-                    desktop(dark: true)
-                    desktop(dark: false).mask(alignment: .trailing) { Rectangle().frame(width: proxy.size.width / 2) }
+                    HStack(spacing: 0) {
+                        desktop(dark: true).frame(width: proxy.size.width / 2)
+                        desktop(dark: false).frame(width: proxy.size.width / 2)
+                    }
                 } else {
                     desktop(dark: mode == 2)
                 }
@@ -358,12 +360,12 @@ private struct RetentionPopup: View {
     @Binding var selection: Int
     private let options = [(0, "Forever"), (1, "1 day"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (180, "6 months"), (365, "1 year")]
     var body: some View {
-        SettingsPopup(selection: $selection, options: options, width: 125).frame(width: 125, height: 28)
+        NeutralSettingsPopup(selection: $selection, options: options, width: 125).frame(width: 125, height: 28)
     }
 }
 
-/// Uses the system menu picker for the field and its popup.
-private struct SettingsPopup: View {
+/// Native pop-up interaction, with a neutral field matching the surrounding controls.
+private struct SettingsPopup: NSViewRepresentable {
     @Binding var selection: Int
     let options: [(Int, String)]
     let width: CGFloat
@@ -373,10 +375,41 @@ private struct SettingsPopup: View {
     init(selection: Binding<Int>, options: [String], width: CGFloat) {
         self.init(selection: selection, options: Array(options.enumerated()).map { ($0.offset, $0.element) }, width: width)
     }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.isBordered = false
+        (button.cell as? NSPopUpButtonCell)?.arrowPosition = .noArrow
+        button.target = context.coordinator; button.action = #selector(Coordinator.changed(_:))
+        return button
+    }
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.parent = self
+        if button.itemTitles != options.map(\.1) { button.removeAllItems(); button.addItems(withTitles: options.map(\.1)) }
+        if let index = options.firstIndex(where: { $0.0 == selection }) { button.selectItem(at: index) }
+    }
+    final class Coordinator: NSObject {
+        var parent: SettingsPopup
+        init(_ parent: SettingsPopup) { self.parent = parent }
+        @objc func changed(_ sender: NSPopUpButton) {
+            guard parent.options.indices.contains(sender.indexOfSelectedItem) else { return }
+            parent.selection = parent.options[sender.indexOfSelectedItem].0
+            if let index = parent.options.firstIndex(where: { $0.0 == parent.selection }) { sender.selectItem(at: index) }
+        }
+    }
+}
+
+private struct NeutralSettingsPopup: View {
+    @Binding var selection: Int
+    let options: [(Int, String)]
+    let width: CGFloat
     var body: some View {
-        Picker("", selection: $selection) {
-            ForEach(options, id: \.0) { value, title in Text(title).tag(value) }
-        }.labelsHidden().pickerStyle(.menu).frame(width: width)
+        SettingsPopup(selection: $selection, options: options, width: width)
+            .padding(.leading, 7).padding(.trailing, 22)
+            .frame(width: width, height: 28)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
+            .overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).padding(.trailing, 8).allowsHitTesting(false) }
     }
 }
 
