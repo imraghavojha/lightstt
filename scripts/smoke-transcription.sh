@@ -9,12 +9,12 @@ cleanup() {
     rm -rf "$work"
 }
 trap cleanup EXIT
-LIGHTTTS_BUILD_CONFIGURATION=debug scripts/build-app.sh
+LIGHTTTS_BUILD_CONFIGURATION=debug LIGHTTTS_APP_OUTPUT="$work/LightTTS.app" scripts/build-app.sh
 say -o "$work/speech.aiff" 'The quick brown fox jumps over the lazy dog.'
 afconvert "$work/speech.aiff" "$work/speech.wav" -f WAVE -d LEI16@16000 -c 1
 for model in whisper-tiny.en parakeet-v3; do
     osascript -e 'tell application "TextEdit" to make new document' -e 'tell application "TextEdit" to activate' >/dev/null
-    LIGHTTTS_TEST_AUDIO="$work/speech.wav" LIGHTTTS_TEST_PASTE=1 LIGHTTTS_TEST_MODEL="$model" LIGHTTTS_TEST_TRACE=1 LIGHTTTS_LAUNCH_MARKER="$work/ready" "$HOME/Applications/LightTTS.app/Contents/MacOS/LightTTS" >"$work/$model.log" 2>&1 &
+    LIGHTTTS_TEST_AUDIO="$work/speech.wav" LIGHTTTS_TEST_PASTE=1 LIGHTTTS_TEST_MODEL="$model" LIGHTTTS_TEST_TRACE=1 LIGHTTTS_LAUNCH_MARKER="$work/ready" "$work/LightTTS.app/Contents/MacOS/LightTTS" >"$work/$model.log" 2>&1 &
     pid=$!
     for ((i=0; i<60; i++)); do [[ -f "$work/ready" ]] && break; kill -0 "$pid"; sleep 1; done
     [[ -f "$work/ready" ]] || { cat "$work/$model.log"; exit 1; }
