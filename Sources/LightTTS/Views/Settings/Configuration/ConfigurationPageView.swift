@@ -11,7 +11,7 @@ struct ConfigurationPageView: View {
     @AppStorage("theme") var theme = "Auto"
     @AppStorage("modelIdleTimeoutSeconds") var modelIdleTimeout = 300
     @AppStorage("historyFolder") var historyFolder = ""
-    @AppStorage("recordingWindow") var recordingWindow = "Classic"
+    @AppStorage("recordingWindow") var recordingWindow = "Mini"
     @AppStorage("hotkeyCode") var hotkeyCode = 49
     @AppStorage("hotkeyModifiers") var hotkeyModifiers = Int(NSEvent.ModifierFlags.option.rawValue)
     @AppStorage("cancelHotkeyCode") var cancelHotkeyCode = 53

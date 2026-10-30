@@ -20,8 +20,8 @@ extension ConfigurationPageView {
                 Text("Recording window").padding(.top, 1)
                 Spacer()
                 choices(
-                    ["Classic", "Mini", "None"], selection: $recordingWindow,
-                    icons: ["waveform", "waveform", "eye.slash"]
+                    ["Mini", "None"], selection: $recordingWindow,
+                    icons: ["waveform", "eye.slash"]
                 ).padding(.trailing, 4)
             }.padding(.top, 12).padding(.bottom, 10)
         }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }

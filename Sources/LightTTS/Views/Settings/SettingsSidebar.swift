@@ -76,13 +76,6 @@ extension SettingsView {
             ).overlay(
                 RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
             )
-            Text("LightTTS").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity).frame(height: 36).background(
-                    Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10)
-                ).overlay(
-                    RoundedRectangle(cornerRadius: 10).stroke(
-                        Color.primary.opacity(0.12), lineWidth: 1)
-                ).padding(.top, 24)
         }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(
             maxHeight: .infinity
         ).background(
