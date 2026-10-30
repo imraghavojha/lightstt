@@ -8,9 +8,10 @@ Requires Apple Silicon, macOS 14.2 or later, Swift 6, and Xcode command-line too
 
 ```sh
 scripts/setup-signing.sh
-scripts/build-app.sh
-open ~/Applications/LightTTS.app
+scripts/install.sh
 ```
+
+The signing setup requires the original LightTTS signing keychain; creating a new certificate would change the app identity. `scripts/build-app.sh` builds a signed app in `build/` without installing it. `scripts/check.sh` runs the local checks. `scripts/e2e-dictation.sh` exercises the installed app through a speaker and microphone when the required permissions are already granted.
 
 Grant Microphone, Accessibility, and Input Monitoring permissions when prompted. The default shortcut is Option-Space. Apple Speech may require a system asset download and macOS 26 or later.
 
