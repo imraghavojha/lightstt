@@ -7,6 +7,7 @@ import AVFoundation
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var activeKey = false
+    private var rightOption = ModifierKeyState()
     var onShortcut: ((Bool) -> Void)?
     var onEscape: (() -> Void)?
     func install() -> Bool {
@@ -28,13 +29,14 @@ import AVFoundation
         return true
     }
     private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } }; if let tap { CGEvent.tapEnable(tap: tap, enable: true) }; return false }
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if rightOption.reset() != nil || activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } }; if let tap { CGEvent.tapEnable(tap: tap, enable: true) }; return false }
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         if type == .keyDown && code == 53 { DispatchQueue.main.async { self.onEscape?() }; return false }
         let right = UserDefaults.standard.bool(forKey: "rightOption")
         if right {
             guard type == .flagsChanged && code == 61 else { return false }
-            activeKey = !activeKey; let down = activeKey; DispatchQueue.main.async { self.onShortcut?(down) }; return false
+            guard let down = rightOption.update(flags: event.flags.rawValue) else { return false }
+            DispatchQueue.main.async { self.onShortcut?(down) }; return false
         }
         let key = UserDefaults.standard.object(forKey: "hotkeyCode") as? Int ?? 49
         guard code == key, type == .keyDown || type == .keyUp else { return false }
@@ -46,5 +48,5 @@ import AVFoundation
         guard activeKey else { return false }
         activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) }; return true
     }
-    func stop() { if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; source = nil; tap = nil; if activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } } }
+    func stop() { if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; source = nil; tap = nil; if rightOption.reset() != nil || activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } } }
 }

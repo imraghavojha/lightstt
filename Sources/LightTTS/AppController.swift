@@ -14,6 +14,7 @@ import LightTTSCore
     @Published var models: [Model] = []
     @Published var busyModel: String?
     @Published var downloadProgress: Double = 0
+    var onCatalogReady: (() -> Void)?
     private var downloadTask: Task<Void, Never>?
     private var engine: (any TranscriptionEngine)?
     private var loadedID = ""
@@ -39,7 +40,7 @@ import LightTTSCore
                 let history = (try? Data(contentsOf: historyURL)).flatMap { try? JSONDecoder().decode([HistoryEntry].self, from: $0) } ?? []
                 return (catalog + custom, Array(history.prefix(500)))
             }.value
-            self.models = data.0; self.history = data.1
+            self.models = data.0; self.history = data.1; LaunchTrace.mark("catalog-ready"); self.onCatalogReady?()
         }
         #if DEBUG
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
@@ -69,10 +70,12 @@ import LightTTSCore
             catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = "" }
         }
     }
-    func installHotkey() {
+    @discardableResult func installHotkey() -> Bool {
         hotkey.onShortcut = { [weak self] down in self?.handleShortcut(down) }
         hotkey.onEscape = { [weak self] in if self?.state != "idle" { self?.cancel() } }
-        if !hotkey.install() { message = "Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut." }
+        let installed = hotkey.install()
+        if !installed { message = "Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut." }
+        return installed
     }
     func requestPermissions() {
         _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)

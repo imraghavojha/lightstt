@@ -3,14 +3,13 @@ import SwiftUI
 @MainActor final class MenuBarController: NSObject, NSWindowDelegate {
     private let app: AppController
     private let status: NSStatusItem
-    private let popover = NSPopover()
+    private lazy var popover: NSPopover = { let value = NSPopover(); value.behavior = .transient; return value }()
     private var window: NSWindow?
     init(app: AppController) {
         self.app = app; status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         status.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "LightTTS")
         status.button?.target = self; status.button?.action = #selector(toggle)
-        popover.behavior = .transient
     }
     private func updateContent(attached: Bool) {
         let view = SettingsView(controller: app, detach: { [weak self] in self?.switchPresentation() }, attached: attached)

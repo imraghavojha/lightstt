@@ -28,10 +28,14 @@ keyUsage=critical,digitalSignature
 extendedKeyUsage=critical,codeSigning
 CONF
 openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 -config "$CERT_DIR/cert.cnf" -keyout "$TMP_DIR/key.pem" -out "$CERT_DIR/cert.pem" >/dev/null 2>&1
-openssl pkcs12 -export -legacy -inkey "$TMP_DIR/key.pem" -in "$CERT_DIR/cert.pem" -name "$NAME" -out "$TMP_DIR/identity.p12" -passout "pass:$PASSWORD"
+# OpenSSL 3 needs -legacy for the PBE algorithms accepted by Keychain; LibreSSL
+# provides those algorithms natively and does not recognize -legacy.
+PKCS12_FLAGS=()
+if openssl version | grep -Eq '^OpenSSL (3|[4-9])\.'; then PKCS12_FLAGS=(-legacy); fi
+openssl pkcs12 -export "${PKCS12_FLAGS[@]}" -descert -inkey "$TMP_DIR/key.pem" -in "$CERT_DIR/cert.pem" -name "$NAME" -out "$TMP_DIR/identity.p12" -passout "pass:$PASSWORD"
 security create-keychain -p "$PASSWORD" "$KEYCHAIN"
 security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
-security import "$TMP_DIR/identity.p12" -k "$KEYCHAIN" -f pkcs12 -P "$PASSWORD" -T /usr/bin/codesign -A
+security import "$TMP_DIR/identity.p12" -k "$KEYCHAIN" -f pkcs12 -P "$PASSWORD" -T /usr/bin/codesign -x
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN" >/dev/null
 KEYCHAINS=()
 while IFS= read -r line; do
