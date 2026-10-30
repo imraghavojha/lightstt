@@ -59,7 +59,38 @@ import Darwin
     private var mouseOwnsRecording = false
     private var generation = 0
     private let historyQueue = DispatchQueue(label: "com.lighttts.history", qos: .utility)
-    private let historyURL = (CommandLine.arguments.contains("--ui-fixture") || !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty) ? FileManager.default.temporaryDirectory.appendingPathComponent("LightTTS-Fixture", isDirectory: true).appendingPathComponent("history.json") : ModelStore.directory.deletingLastPathComponent().appendingPathComponent("history.json")
+    var historyURL: URL {
+        let fixture = CommandLine.arguments.contains("--ui-fixture") || !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
+        let configured = UserDefaults.standard.string(forKey: "historyFolder")
+        let folder = fixture ? FileManager.default.temporaryDirectory.appendingPathComponent("LightTTS-Fixture", isDirectory: true) : configured.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? ModelStore.directory.deletingLastPathComponent()
+        return folder.appendingPathComponent("history.json")
+    }
+    func changeHistoryFolder(_ destination: URL) throws {
+        let source = historyURL.deletingLastPathComponent().standardizedFileURL
+        let destination = destination.standardizedFileURL
+        guard source != destination else { return }
+        guard state == "idle" || state == "error" else { throw NSError(domain: "LightTTS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Wait for the current recording to finish before changing folders."]) }
+        let recordings = source.appendingPathComponent("Recordings", isDirectory: true).path + "/"
+        guard !destination.path.hasPrefix(recordings) else { throw NSError(domain: "LightTTS", code: 3, userInfo: [NSLocalizedDescriptionKey: "Choose a folder outside the current Recordings folder."]) }
+        stopHistoryPlayback()
+        try historyQueue.sync {
+            let fm = FileManager.default
+            let names = ["history.json", "Recordings"]
+            for name in names where fm.fileExists(atPath: destination.appendingPathComponent(name).path) {
+                throw NSError(domain: "LightTTS", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected folder already contains \(name). Choose an empty folder."])
+            }
+            var copied: [URL] = []
+            do {
+                for name in names {
+                    let from = source.appendingPathComponent(name), to = destination.appendingPathComponent(name)
+                    if fm.fileExists(atPath: from.path) { try fm.copyItem(at: from, to: to); copied.append(to) }
+                }
+            } catch { for url in copied { try? fm.removeItem(at: url) }; throw error }
+            UserDefaults.standard.set(destination.path, forKey: "historyFolder")
+        }
+        saveHistory()
+    }
+    func refreshModelIdleTimeout() { if state == "idle" || state == "error" { scheduleEngineUnload() } }
     override init() {
         super.init()
         let historyURL = self.historyURL
@@ -359,7 +390,7 @@ import Darwin
         unloadTimer?.invalidate(); unloadTimer = nil
         guard engine != nil || warming != nil else { return }
         guard keepModelLoaded else { unloadEngine(); return }
-        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") as? Double ?? 120
+        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") == nil ? 120 : UserDefaults.standard.double(forKey: "modelIdleTimeoutSeconds")
         let interval = max(1, configured)
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in

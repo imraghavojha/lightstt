@@ -154,6 +154,8 @@ private struct ConfigurationPageView: View {
     @Environment(\.colorScheme) private var scheme
     @ObservedObject var controller: AppController
     @AppStorage("theme") private var theme = "Auto"
+    @AppStorage("modelIdleTimeoutSeconds") private var modelIdleTimeout = 120
+    @AppStorage("historyFolder") private var historyFolder = ""
     @AppStorage("recordingWindow") private var recordingWindow = "Classic"
     @AppStorage("alwaysShowRecordingWindow") private var alwaysShow = false
     @AppStorage("hotkeyCode") private var hotkeyCode = 49
@@ -189,11 +191,10 @@ private struct ConfigurationPageView: View {
             }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }.onChange(of: alwaysShow) { _ in controller.refreshRecordingWindow() }
             Text("Keyboard Shortcuts").font(.system(size: 13, weight: .medium)).padding(.top, 18).padding(.bottom, 9)
             SettingsCard {
-                shortcutRow("Toggle Recording", subtitle: "Starts and stops recordings", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); PageRule()
-                shortcutRow("Cancel Recording", subtitle: "Discards the active recording", key: "cancelHotkeyCode", modifiers: nil, fallback: 53); PageRule()
-                HStack(spacing: 4) { VStack(alignment: .leading, spacing: 2) { Text("Change mode"); Text("Activates the mode switcher").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255)) }; Spacer(); Image(systemName: "arrow.counterclockwise").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 4); keycap("⌥"); keycap("⇧"); keycap("K") }.padding(.trailing, 6).frame(minHeight: 50).help("Modes are not included in LightTTS"); PageRule()
                 shortcutRow("Push to Talk", subtitle: "Hold to record, release when done", key: "pushHotkeyCode", modifiers: "pushHotkeyModifiers", fallback: 49, enabled: "pushShortcutEnabled"); PageRule()
-                HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255)) }; Spacer(); MouseShortcutRecorder().frame(width: 120, height: 28) }.frame(minHeight: 50)
+                shortcutRow("Toggle Recording", subtitle: "Starts and stops recordings", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); PageRule()
+                HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255)) }; Spacer(); MouseShortcutRecorder().frame(width: 120, height: 28) }.frame(minHeight: 50); PageRule()
+                shortcutRow("Cancel Recording", subtitle: "Discards the active recording", key: "cancelHotkeyCode", modifiers: nil, fallback: 53)
             }
             Text("Application").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 9)
             SettingsCard {
@@ -220,14 +221,21 @@ private struct ConfigurationPageView: View {
                     unavailableRow("Close after transcription")
                 }
                 advancedHeading("Voice model")
-                SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Voice model lifetime is managed automatically") { Text("Automatic").foregroundStyle(.secondary) } }
+                SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Unload the voice model after this period of inactivity") { SettingsPopup(selection: $modelIdleTimeout, options: [(60, "1 minute"), (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"), (1800, "30 minutes")], width: 125).frame(width: 125, height: 28).onChange(of: modelIdleTimeout) { _ in controller.refreshModelIdleTimeout() } } }
                 advancedHeading("Audio processing")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Silence removal", help: "Remove silence from recordings") { Toggle("", isOn: $removeSilence).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Silence removal")) }; PageRule()
                     ConfigurationApplicationRow(title: "Dynamic normalization", help: "Normalize recording volume") { Toggle("", isOn: $normalizeAudio).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Dynamic normalization")) }
                 }
                 advancedHeading("App folder location")
-                SettingsCard { ConfigurationApplicationRow(title: "App folder location") { Text("Managed by LightTTS").foregroundStyle(.secondary) } }
+                SettingsCard { HStack(spacing: 10) {
+                    Text(controller.historyURL.deletingLastPathComponent().path).lineLimit(1).truncationMode(.middle).help(controller.historyURL.deletingLastPathComponent().path)
+                    Spacer(minLength: 8)
+                    Button("Change folder") {
+                        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+                        if panel.runModal() == .OK, let url = panel.url { do { try controller.changeHistoryFolder(url) } catch { controller.message = error.localizedDescription; let alert = NSAlert(error: error); alert.runModal() } }
+                    }
+                }.frame(minHeight: 46) }
                 advancedHeading("Text input")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Clipboard content", help: "Choose whether to restore the previous clipboard contents") {
@@ -269,7 +277,7 @@ private struct ConfigurationPageView: View {
                                 HStack(spacing: 1) { ForEach(Array([2, 4, 7, 5, 9, 7, 4, 6, 3, 5, 8, 5, 4, 7, 11, 8, 6, 5, 3, 6, 4, 5, 4, 3, 2].enumerated()), id: \.offset) { _, height in Capsule().fill(.white).frame(width: 1, height: CGFloat(height)) } }.frame(height: 16)
                                 RoundedRectangle(cornerRadius: 3).fill(Color(white: 0.25)).frame(width: 56, height: 6)
                             }.frame(width: 62, height: 30).background(.black, in: RoundedRectangle(cornerRadius: 6))
-                        } else { HStack(spacing: 2) { ForEach(Array([4, 8, 11, 6, 4, 8, 5].enumerated()), id: \.offset) { _, height in Capsule().fill(.white).frame(width: 2, height: CGFloat(height)) } }.frame(width: 50, height: 20).background(.black, in: Capsule()) }
+                        } else { HStack(spacing: 1) { ForEach(Array([2, 4, 7, 4, 9, 5, 7, 4, 6, 3, 2].enumerated()), id: \.offset) { _, height in Capsule().fill(Color(white: 0.64)).frame(width: 1.5, height: CGFloat(height)) } }.frame(width: 50, height: 20).background(.black, in: Capsule()) }
                     }
                 }.frame(width: values.first == "Auto" ? 70 : 95, height: 44).clipShape(RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.2), lineWidth: 0.5)).overlay(RoundedRectangle(cornerRadius: 10).stroke(selection.wrappedValue == value ? Color(red: 0/255, green: 145/255, blue: 255/255) : .clear, lineWidth: 2).padding(-3))
                 Text(value).font(.system(size: 11, weight: .medium)).lineLimit(1).fixedSize(horizontal: true, vertical: false).foregroundStyle(selection.wrappedValue == value ? .primary : .secondary)
@@ -289,7 +297,8 @@ private struct ThemeArtwork: View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
                 if mode == 0 {
-                    HStack(spacing: 0) { desktop(dark: true); desktop(dark: false) }
+                    desktop(dark: true)
+                    desktop(dark: false).mask(alignment: .trailing) { Rectangle().frame(width: proxy.size.width / 2) }
                 } else {
                     desktop(dark: mode == 2)
                 }
@@ -324,7 +333,7 @@ private struct ConfigurationApplicationRow<Content: View>: View {
     let title: String
     var help: String? = nil
     @ViewBuilder var content: Content
-    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "questionmark.circle").foregroundStyle(.secondary).help(help) }; Spacer(); content }.frame(minHeight: title == "Keep recordings for" ? 58 : (advanced ? 46 : 43)) }
+    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "questionmark.circle").foregroundStyle(.secondary).help(help) }; Spacer(); content }.frame(minHeight: title == "Keep recordings for" ? 58 : (advanced ? (title == "Voice model active duration" ? 60 : 46) : 43)) }
 }
 
 private struct PageRule: View {
