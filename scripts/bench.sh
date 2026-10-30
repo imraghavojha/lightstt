@@ -71,7 +71,7 @@ def footprint(pid, label):
     return bool(match) and result.returncode == 0
 def idle(pid, label, path):
     footprint_ok = footprint(pid, label)
-    result = run(['top','-l','31','-s','2','-stats','pid,command,cpu,power,idlew,mem'])
+    result = run(['top','-l','31','-s','2','-pid',str(pid),'-stats','pid,command,cpu,power,idlew,mem'])
     (out / (label + '-top.txt')).write_text(result.stdout)
     rows = []
     for line in result.stdout.splitlines():
