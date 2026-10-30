@@ -12,6 +12,13 @@ public enum SpeechError: LocalizedError {
     public var errorDescription: String? { switch self { case .model(let s), .audio(let s): return s } }
 }
 
+private final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func cancel() { lock.lock(); value = true; lock.unlock() }
+    func isCancelled() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 public actor WhisperCppEngine: TranscriptionEngine {
     private let context: OpaquePointer
     public init(modelURL: URL) throws {
@@ -26,9 +33,19 @@ public actor WhisperCppEngine: TranscriptionEngine {
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         params.print_progress = false; params.print_realtime = false; params.print_timestamps = false
         params.no_context = true
-        let status = samples.withUnsafeBufferPointer { whisper_full(context, params, $0.baseAddress, Int32($0.count)) }
-        guard status == 0 else { throw SpeechError.model("Whisper inference failed (\(status))") }
-        return (0..<whisper_full_n_segments(context)).compactMap { whisper_full_get_segment_text(context, $0).map { String(cString: $0) } }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        let flag = CancellationFlag()
+        params.abort_callback = { pointer in
+            guard let pointer else { return false }
+            return Unmanaged<CancellationFlag>.fromOpaque(pointer).takeUnretainedValue().isCancelled()
+        }
+        params.abort_callback_user_data = Unmanaged.passUnretained(flag).toOpaque()
+        return try await withTaskCancellationHandler(operation: {
+            try Task.checkCancellation()
+            let status = samples.withUnsafeBufferPointer { whisper_full(context, params, $0.baseAddress, Int32($0.count)) }
+            try Task.checkCancellation()
+            guard status == 0 else { throw SpeechError.model("Whisper inference failed (\(status))") }
+            return (0..<whisper_full_n_segments(context)).compactMap { whisper_full_get_segment_text(context, $0).map { String(cString: $0) } }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        }, onCancel: { flag.cancel() })
     }
 }
 
@@ -41,7 +58,7 @@ public actor ParakeetEngine: TranscriptionEngine {
         try await manager.loadModels(models)
         self.manager = manager
     }
-    public func transcribe(samples: [Float]) async throws -> String { var state = try TdtDecoderState(); return try await manager.transcribe(samples, decoderState: &state).text }
+    public func transcribe(samples: [Float]) async throws -> String { try Task.checkCancellation(); var state = try TdtDecoderState(); let result = try await manager.transcribe(samples, decoderState: &state); try Task.checkCancellation(); return result.text }
 }
 
 public enum AudioFileReader {

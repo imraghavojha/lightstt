@@ -13,14 +13,18 @@ import LightTTSCore
     @Published var history: [HistoryEntry] = []
     @Published var models = (try? ModelCatalog.load()) ?? []
     @Published var busyModel: String?
+    @Published var downloadProgress: Double = 0
+    private var downloadTask: Task<Void, Never>?
     private var engine: (any TranscriptionEngine)?
     private var loadedID = ""
     private var warmingID = ""
+    private var warmingToken = UUID()
     private var warming: Task<any TranscriptionEngine, Error>?
     private var audio: AudioCapture?
     private var panel: NSPanel?
-    private var monitor: Any?
-    private var localMonitor: Any?
+    private let hotkey = HotkeyMonitor()
+    private var processing: Task<Void, Never>?
+    private var focus: AXUIElement?
     private var pressed = false
     private var generation = 0
     private let historyURL = ModelStore.directory.deletingLastPathComponent().appendingPathComponent("history.json")
@@ -28,43 +32,75 @@ import LightTTSCore
         super.init()
         if let data = UserDefaults.standard.data(forKey: "customModels"), let custom = try? JSONDecoder().decode([Model].self, from: data) { models.append(contentsOf: custom) }
         if let data = try? Data(contentsOf: historyURL), let items = try? JSONDecoder().decode([HistoryEntry].self, from: data) { history = items }
-        installHotkey()
-        warmSelected()
+        #if DEBUG
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(testToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(testHIDShortcut(_:)), name: Notification.Name("com.lighttts.test.hid.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
+        #endif
     }
+    #if DEBUG
+    @objc private func testToggle(_ notification: Notification) { handleShortcut(true); handleShortcut(false) }
+    @objc private func testHIDShortcut(_ notification: Notification) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            if let event = CGEvent(keyboardEventSource: source, virtualKey: 49, keyDown: down) { event.flags = .maskAlternate; event.post(tap: .cghidEventTap) }
+        }
+    }
+    #endif
     func warmSelected() {
-        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+        let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
         guard selected != loadedID, selected != warmingID, let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { return }
-        warmingID = selected
-        warming = Task.detached(priority: .utility) { try await ModelStore.engine(for: model) }
+        warming?.cancel()
+        warmingID = selected; warmingToken = UUID()
+        let token = warmingToken
+        let task = Task.detached(priority: .utility) { try await ModelStore.engine(for: model) }
+        warming = task
+        Task { [weak self] in
+            do { _ = try await task.value }
+            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = "" }
+        }
     }
     func installHotkey() {
-        if let monitor { NSEvent.removeMonitor(monitor) }; if let localMonitor { NSEvent.removeMonitor(localMonitor) }
-        let mask: NSEvent.EventTypeMask = [.keyDown, .keyUp, .flagsChanged]
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in Task { @MainActor in self?.handle(event) } }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in self?.handle(event); return event }
+        hotkey.onShortcut = { [weak self] down in self?.handleShortcut(down) }
+        hotkey.onEscape = { [weak self] in if self?.state != "idle" { self?.cancel() } }
+        if !hotkey.install() { message = "Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut." }
     }
-    private func handle(_ event: NSEvent) {
-        if event.type == .keyDown && event.keyCode == 53 && state != "idle" { cancel(); return }
-        let rightOption = UserDefaults.standard.bool(forKey: "rightOption")
-        let down: Bool
-        if rightOption {
-            guard event.type == .flagsChanged && event.keyCode == 61 else { return }
-            down = event.modifierFlags.contains(.option)
-        } else {
-            let code = UserDefaults.standard.object(forKey: "hotkeyCode") as? Int ?? 49
-            guard Int(event.keyCode) == code, event.type == .keyDown || event.type == .keyUp else { return }
-            down = event.type == .keyDown && event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.option)
-            if event.isARepeat { return }
+    func requestPermissions() {
+        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+        _ = CGRequestListenEventAccess()
+        installHotkey()
+    }
+    private func handleShortcut(_ down: Bool) {
+        if down && !pressed {
+            pressed = true
+            if UserDefaults.standard.bool(forKey: "pushToTalk") { start() }
+            else if state == "starting" { cancel() }
+            else if state == "recording" { stop() }
+            else if state == "idle" { start() }
+        } else if !down && pressed {
+            pressed = false
+            if UserDefaults.standard.bool(forKey: "pushToTalk") {
+                if state == "starting" { cancel() } else if state == "recording" { stop() }
+            }
         }
-        if down && !pressed { pressed = true; if UserDefaults.standard.bool(forKey: "pushToTalk") { start() } else if state == "recording" { stop() } else if state == "idle" { start() } }
-        else if !down && pressed { pressed = false; if UserDefaults.standard.bool(forKey: "pushToTalk") && state == "recording" { stop() } }
     }
     func start() {
         guard state == "idle" else { return }
         generation += 1; let current = generation
+        state = "starting"
+        let system = AXUIElementCreateSystemWide(); var focused: CFTypeRef?
+        focus = nil
+        if AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let focused { focus = (focused as! AXUIElement) }
+        if focus == nil, let app = NSWorkspace.shared.frontmostApplication {
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute as CFString, &value) == .success, let value { focus = (value as! AXUIElement) }
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { var pid: pid_t = 0; if let focus { AXUIElementGetPid(focus, &pid) }; fputs("LightTTS test: captured focus pid=\(pid), front=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)\n", stderr) }
+        #endif
+        guard focus != nil else { fail("Focus a text field and check Accessibility access before recording."); return }
         Task {
             let allowed = await AVCaptureDevice.requestAccess(for: .audio)
-            guard current == generation else { return }
+            guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
             guard allowed else { fail("Microphone access is required. Enable it in System Settings."); return }
             do {
                 let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
@@ -74,28 +110,43 @@ import LightTTSCore
     }
     func stop() {
         guard state == "recording", let audio else { return }
-        let samples = audio.stop(); self.audio = nil; state = "processing"; let current = generation
-        Task {
+        let recorded = audio.stop(); self.audio = nil; state = "processing"; let current = generation
+        let samples: [Float]
+        #if DEBUG
+        if let path = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_WAV"] {
+            do { samples = try AudioFileReader.read(URL(fileURLWithPath: path)) } catch { fail(error.localizedDescription); return }
+        } else { samples = recorded }
+        #else
+        samples = recorded
+        #endif
+        processing = Task {
             do {
-                let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+                let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
                 if loadedID != selected || engine == nil {
                     warmSelected()
-                    if warmingID == selected, let warming { engine = try await warming.value }
-                    else { engine = try await ModelStore.engine(for: model) }
-                    loadedID = selected; warmingID = ""; warming = nil
+                    let token = warmingToken
+                    let resolved: any TranscriptionEngine
+                    do {
+                        if warmingID == selected, let warming { resolved = try await warming.value }
+                        else { resolved = try await ModelStore.engine(for: model) }
+                    } catch { if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }; throw error }
+                    if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }
+                    try Task.checkCancellation(); guard current == generation else { return }
+                    engine = resolved; loadedID = selected
                 }
                 guard let engine else { return }
+                try Task.checkCancellation(); guard current == generation else { return }
                 let text = try await engine.transcribe(samples: samples)
                 guard current == generation else { return }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
                 guard AXIsProcessTrusted() else { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary); throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
-                paste(text); history.insert(HistoryEntry(text: text, date: Date()), at: 0); saveHistory(); state = "done"
+                try insert(text); history.insert(HistoryEntry(text: text, date: Date()), at: 0); saveHistory(); state = "done"
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
     }
-    func cancel() { generation += 1; _ = audio?.stop(); audio = nil; hide() }
+    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; hide() }
     private func hide() { panel?.orderOut(nil); state = "idle"; level = 0 }
     private func fail(_ text: String) { message = text; state = "error"; showPanel() }
     private func showPanel() {
@@ -106,15 +157,13 @@ import LightTTSCore
         }
         if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70)); p.orderFrontRegardless() }
     }
-    private func paste(_ text: String) {
-        let board = NSPasteboard.general
-        let old = board.pasteboardItems?.map { item in item.types.compactMap { type -> (NSPasteboard.PasteboardType, Data)? in item.data(forType: type).map { (type, $0) } } } ?? []
-        board.clearContents(); board.setString(text, forType: .string); let change = board.changeCount
-        let source = CGEventSource(stateID: .hidSystemState); let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true); let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false); down?.flags = .maskCommand; up?.flags = .maskCommand; down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            guard board.changeCount == change else { return }; board.clearContents()
-            let items = old.map { entries -> NSPasteboardItem in let item = NSPasteboardItem(); for (type, data) in entries { item.setData(data, forType: type) }; return item }
-            if !items.isEmpty { board.writeObjects(items) }
+    private func insert(_ text: String) throws {
+        let result = focus.map { AXUIElementSetAttributeValue($0, kAXSelectedTextAttribute as CFString, text as CFTypeRef) } ?? .failure
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { var pid: pid_t = 0; if let focus { AXUIElementGetPid(focus, &pid) }; fputs("LightTTS test: insert pid=\(pid) result=\(result.rawValue) text=\(text)\n", stderr) }
+        #endif
+        guard result == .success else {
+            throw SpeechError.audio("Could not insert into the focused field. The transcription was not pasted.")
         }
     }
     private func saveHistory() { try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true); if let data = try? JSONEncoder().encode(history) { try? data.write(to: historyURL, options: .atomic) } }
@@ -125,9 +174,10 @@ import LightTTSCore
         do { try ModelStore.importFile(url, id: id); addCustom(Model(id: id, name: url.lastPathComponent, engine: "whisper")) }
         catch { message = error.localizedDescription }
     }
-    func importRemoteModel(_ address: String) {
-        guard let url = URL(string: address), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { message = "Enter a valid HTTP(S) model URL."; return }
-        let model = Model(id: "custom-" + UUID().uuidString, name: url.lastPathComponent, engine: "whisper", url: url)
+    func importRemoteModel(_ address: String, sha256: String) {
+        guard let url = URL(string: address), url.scheme?.lowercased() == "https" else { message = "Enter a valid HTTPS model URL."; return }
+        guard sha256.count == 64, sha256.allSatisfy({ $0.isHexDigit }) else { message = "Enter the model SHA-256."; return }
+        let model = Model(id: "custom-" + UUID().uuidString, name: url.lastPathComponent, engine: "whisper", url: url, sha256: sha256.lowercased())
         addCustom(model); download(model)
     }
     private func addCustom(_ model: Model) {
@@ -135,6 +185,26 @@ import LightTTSCore
         let custom = models.filter { $0.id.hasPrefix("custom-") }
         if let data = try? JSONEncoder().encode(custom) { UserDefaults.standard.set(data, forKey: "customModels") }
     }
-    func download(_ model: Model) { guard busyModel == nil else { return }; busyModel = model.id; Task { do { try await ModelStore.download(model) } catch { message = error.localizedDescription }; busyModel = nil; warmSelected(); objectWillChange.send() } }
+    func deleteModel(_ model: Model) {
+        do {
+            if ModelStore.exists(model) { try ModelStore.delete(model) }
+            if model.id.hasPrefix("custom-") { models.removeAll { $0.id == model.id }; let custom = models.filter { $0.id.hasPrefix("custom-") }; UserDefaults.standard.set(try JSONEncoder().encode(custom), forKey: "customModels") }
+            if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); engine = nil; loadedID = "" }
+            if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
+            objectWillChange.send()
+        } catch { message = error.localizedDescription }
+    }
+    func cancelDownload() { downloadTask?.cancel() }
+    func download(_ model: Model) {
+        guard busyModel == nil else { return }
+        busyModel = model.id; downloadProgress = 0
+        downloadTask = Task {
+            do { try await ModelStore.download(model) { [weak self] value in Task { @MainActor in self?.downloadProgress = value } } }
+            catch is CancellationError { message = "Download canceled. You can resume it." }
+            catch { message = error.localizedDescription }
+            busyModel = nil; downloadTask = nil; objectWillChange.send()
+        }
+    }
+
 }
 struct HistoryEntry: Codable, Identifiable { var id = UUID(); let text: String; let date: Date }
