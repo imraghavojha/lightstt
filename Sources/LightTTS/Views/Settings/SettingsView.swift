@@ -172,7 +172,6 @@ private struct ConfigurationPageView: View {
     @AppStorage("normalizeAudio") private var normalizeAudio = false
     @AppStorage("historyRetentionDays") private var retention = 0
     @AppStorage("autoCheckUpdates") private var autoCheckUpdates = false
-    @AppStorage("errorLogging") private var errorLogging = false
     var body: some View {
         Group { if controller.showAdvanced { advancedPage } else { configurationPage } }
             .onAppear { controller.refreshLoginStatus() }
@@ -200,7 +199,6 @@ private struct ConfigurationPageView: View {
                 ConfigurationApplicationRow(title: "Update application") { Button("Check for Updates…") { controller.checkUpdates() } }; PageRule()
                 ConfigurationApplicationRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; PageRule()
                 ConfigurationApplicationRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: Binding(get: { controller.loginEnabled }, set: { controller.setLoginEnabled($0) })).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")) }; PageRule()
-                ConfigurationApplicationRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Error logging")).help("Write errors to a local log") }; PageRule()
                 ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { RetentionPopup(selection: retentionBinding) }
             }
             SettingsCard { Button { controller.showAdvanced.toggle() } label: { HStack { Text("Advanced settings"); Spacer(); Image(systemName: controller.showAdvanced ? "chevron.down" : "chevron.right").foregroundStyle(.secondary) }.frame(height: 48).contentShape(Rectangle()) }.buttonStyle(.plain) }.padding(.top, 18)
