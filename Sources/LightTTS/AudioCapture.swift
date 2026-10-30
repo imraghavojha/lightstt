@@ -9,7 +9,7 @@ final class AudioCapture {
     private var usesTestFile = false
     private let onLevel: (Float) -> Void
     init(onLevel: @escaping (Float) -> Void) { self.onLevel = onLevel }
-    func start() throws {
+    func start(deviceUID: String? = nil) throws {
         if let path = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"], !path.isEmpty {
             let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
             let format = file.processingFormat
@@ -30,7 +30,7 @@ final class AudioCapture {
             }
             return
         }
-        try InputDevice.applySelection(to: engine)
+        try InputDevice.applySelection(to: engine, deviceUID: deviceUID)
         let node = engine.inputNode; let format = node.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0, let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false), let converter = AVAudioConverter(from: format, to: target) else { throw SpeechError.audio("No microphone input available") }
         lock.lock(); active = true; lock.unlock()
@@ -42,7 +42,16 @@ final class AudioCapture {
             let chunk = Array(UnsafeBufferPointer(start: data, count: Int(output.frameLength)))
             self.append(chunk)
         }
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            lock.lock()
+            active = false
+            lock.unlock()
+            node.removeTap(onBus: 0)
+            engine.stop()
+            throw error
+        }
     }
     private func append(_ chunk: [Float]) {
         lock.lock()
