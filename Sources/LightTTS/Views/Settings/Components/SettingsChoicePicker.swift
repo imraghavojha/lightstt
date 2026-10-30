@@ -24,24 +24,6 @@ extension ConfigurationPageView {
                                             ? Color.blue.opacity(0.10) : Color.white))
                                 if value == "None" {
                                     Image(systemName: "eye.slash").foregroundStyle(.secondary)
-                                } else if value == "Classic" {
-                                    VStack(spacing: 2) {
-                                        HStack(spacing: 1) {
-                                            ForEach(
-                                                Array(
-                                                    [
-                                                        2, 4, 7, 5, 9, 7, 4, 6, 3, 5, 8, 5, 4, 7,
-                                                        11, 8, 6, 5, 3, 6, 4, 5, 4, 3, 2,
-                                                    ].enumerated()), id: \.offset
-                                            ) { _, height in
-                                                Capsule().fill(.white).frame(
-                                                    width: 1, height: CGFloat(height))
-                                            }
-                                        }.frame(height: 16)
-                                        RoundedRectangle(cornerRadius: 3).fill(Color(white: 0.25))
-                                            .frame(width: 56, height: 6)
-                                    }.frame(width: 62, height: 30).background(
-                                        .black, in: RoundedRectangle(cornerRadius: 6))
                                 } else {
                                     HStack(spacing: 1) {
                                         ForEach(

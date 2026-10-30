@@ -166,6 +166,7 @@ import IOKit.ps
             await ModelStore.refreshAppleStatus(); self.objectWillChange.send()
 
         }
+        if UserDefaults.standard.string(forKey: "recordingWindow") == "Classic" { UserDefaults.standard.set("Mini", forKey: "recordingWindow") }
         if UserDefaults.standard.string(forKey: "recordingSound") == "Muffle" { UserDefaults.standard.set("Lower", forKey: "recordingSound") }
         powerSource = IOPSNotificationCreateRunLoopSource({ context in
             guard let context else { return }
@@ -542,7 +543,7 @@ import IOKit.ps
     }
     private func showPanel() {
         guard state != "idle" else { panel?.orderOut(nil); return }
-        if UserDefaults.standard.string(forKey: "recordingWindow") == "None", state != "error" { return }
+        if UserDefaults.standard.string(forKey: "recordingWindow") == "None", state != "error" { panel?.orderOut(nil); return }
         preparePanel()
         if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70));
             if !p.isVisible { p.alphaValue = 1; p.orderFrontRegardless(); LaunchTrace.mark("panel-ordered-front") }
