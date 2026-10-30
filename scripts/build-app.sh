@@ -7,9 +7,10 @@ BIN="$(swift build -c "$CONFIG" --show-bin-path)"
 APP="$PWD/build/LightTTS.app"
 INSTALL="$HOME/Applications/LightTTS.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" "$APP/Contents/Helpers"
 cp "$BIN/LightTTS" "$APP/Contents/MacOS/LightTTS"
-install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/LightTTS"
+cp "$BIN/LightTTSEngine" "$APP/Contents/Helpers/LightTTSEngine"
+install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/Helpers/LightTTSEngine"
 for bundle in "$BIN"/*.bundle; do [ -e "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"; done
 for framework in "$BIN"/*.framework; do [ -e "$framework" ] && cp -R "$framework" "$APP/Contents/Frameworks/"; done
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -27,6 +28,7 @@ KEYCHAIN="$HOME/Library/Keychains/lighttts-signing.keychain-db"
 security unlock-keychain -p lighttts-local "$KEYCHAIN"
 HASH="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/"LightTTS Dev Signing"/ {print $2; exit}')"
 [[ -n "$HASH" ]] || { echo "LightTTS signing identity is missing; run scripts/setup-signing.sh." >&2; exit 1; }
+codesign --force --sign "$HASH" --keychain "$KEYCHAIN" "$APP/Contents/Helpers/LightTTSEngine"
 codesign --force --deep --sign "$HASH" --keychain "$KEYCHAIN" "$APP"
 codesign --force --sign "$HASH" --keychain "$KEYCHAIN" --requirements "=designated => identifier \"com.lighttts.app\" and certificate leaf = H\"$HASH\"" "$APP"
 mkdir -p "$INSTALL"

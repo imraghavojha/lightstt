@@ -75,7 +75,7 @@ import Darwin
         warming?.cancel()
         warmingID = selected; warmingToken = UUID()
         let token = warmingToken
-        let task = Task.detached(priority: .utility) { try await ModelStore.engine(for: model) }
+        let task = Task.detached(priority: .utility) { () -> any TranscriptionEngine in try await HelperEngine.load(model) }
         warming = task
         if state == "idle" || state == "error" { scheduleEngineUnload() }
         Task { [weak self] in
@@ -118,7 +118,7 @@ import Darwin
         warmSelected()
         sessionAutoPaste = UserDefaults.standard.object(forKey: "autoPaste") as? Bool ?? true
         focus = nil
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
             do {
                 let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
                 try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
@@ -132,6 +132,13 @@ import Darwin
                 guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
                 guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
                 focus = target
+            }
+            if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+                do {
+                    let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
+                    try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
+                } catch { fail(error.localizedDescription) }
+                return
             }
             #if DEBUG
             if let path = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? ProcessInfo.processInfo.environment["LIGHTTTS_TEST_WAV"] {
@@ -150,6 +157,7 @@ import Darwin
     }
     func stop() {
         guard state == "recording" else { return }
+        LaunchTrace.mark("recording-stopped")
         let samples = testAudio ?? audio?.stop() ?? []
         testAudio = nil; audio = nil; state = "processing"; let current = generation
         processing = Task {
@@ -162,7 +170,7 @@ import Darwin
                     let resolved: any TranscriptionEngine
                     do {
                         if warmingID == selected, let warming { resolved = try await warming.value }
-                        else { resolved = try await ModelStore.engine(for: model) }
+                        else { resolved = try await HelperEngine.load(model) }
                     } catch { if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }; throw error }
                     if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }
                     try Task.checkCancellation(); guard current == generation else { return }
@@ -174,7 +182,7 @@ import Darwin
                 guard current == generation else { return }
                 if !keepModelLoaded { unloadEngine() }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
-                if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+                if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
                     print("LIGHTTTS_TEST transcription completed, samples: \(samples.count)")
                     state = "done"
                     try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
@@ -188,12 +196,13 @@ import Darwin
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
+                LaunchTrace.mark("text-inserted")
                 history.insert(HistoryEntry(text: text, date: Date()), at: 0); if history.count > 500 { history.removeLast(history.count - 500) }; saveHistory(); state = "done"
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
     }
-    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; hide() }
+    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide() }
     private func hide() {
         state = "idle"; level = 0
         scheduleEngineUnload()
@@ -220,16 +229,16 @@ import Darwin
     private func unloadEngine() {
         unloadTimer?.invalidate(); unloadTimer = nil
         warmingToken = UUID(); warming?.cancel(); warming = nil; warmingID = ""
+        (engine as? HelperEngine)?.terminate()
         engine = nil; loadedID = ""
-        malloc_zone_pressure_relief(nil, 0)
     }
     // One coalescible, non-repeating timer only while a model is resident or loading.
-    // Set modelIdleTimeoutSeconds in defaults to change the five-minute default.
+    // Set modelIdleTimeoutSeconds in defaults to change the two-minute default.
     private func scheduleEngineUnload() {
         unloadTimer?.invalidate(); unloadTimer = nil
         guard engine != nil || warming != nil else { return }
         guard keepModelLoaded else { unloadEngine(); return }
-        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") as? Double ?? 300
+        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") as? Double ?? 120
         let interval = max(1, configured)
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -237,11 +246,11 @@ import Darwin
                 self.unloadEngine()
             }
         }
-        timer.tolerance = min(30, interval * 0.1)
+        timer.tolerance = 0
         RunLoop.main.add(timer, forMode: .common)
         unloadTimer = timer
     }
-    private func fail(_ text: String) { message = text; state = "error"; scheduleEngineUnload(); showPanel() }
+    private func fail(_ text: String) { if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }; unloadEngine(); message = text; state = "error"; showPanel() }
     private func showPanel() {
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
@@ -275,13 +284,13 @@ import Darwin
         do {
             if ModelStore.exists(model) { try ModelStore.delete(model) }
             if model.id.hasPrefix("custom-") { models.removeAll { $0.id == model.id }; let custom = models.filter { $0.id.hasPrefix("custom-") }; UserDefaults.standard.set(try JSONEncoder().encode(custom), forKey: "customModels") }
-            if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); engine = nil; loadedID = "" }
+            if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); unloadEngine() }
             if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
             objectWillChange.send()
         } catch { message = error.localizedDescription }
     }
     func cancelDownload() { downloadTask?.cancel() }
-    func prepareToQuit() async { let task = downloadTask; task?.cancel(); await task?.value }
+    func prepareToQuit() async { unloadEngine(); let task = downloadTask; task?.cancel(); await task?.value }
     func download(_ model: Model) {
         guard busyModel == nil else { return }
         busyModel = model.id; downloadProgress = 0
