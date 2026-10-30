@@ -18,6 +18,9 @@ import LightTTSCore
         status.button?.action = #selector(togglePopover)
         popover.behavior = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" ? .applicationDefined : .transient
         popover.animates = false
+        if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
+            popover.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
+        }
         updateContent(attached: true)
         if ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showCompact() }
@@ -31,19 +34,19 @@ import LightTTSCore
             // Draw both contours explicitly so the inner corners are rounded too.
             path.move(to: NSPoint(x: 9, y: 15.75))
             path.curve(to: NSPoint(x: 7.35, y: 14.55), controlPoint1: NSPoint(x: 8.3, y: 15.75), controlPoint2: NSPoint(x: 7.8, y: 15.35))
-            path.curve(to: NSPoint(x: 1.95, y: 4.45), controlPoint1: NSPoint(x: 4.8, y: 9.8), controlPoint2: NSPoint(x: 1.25, y: 5.95))
+            path.curve(to: NSPoint(x: 1.95, y: 4.45), controlPoint1: NSPoint(x: 4.8, y: 9.8), controlPoint2: NSPoint(x: -0.25, y: 5.95))
             path.curve(to: NSPoint(x: 3.5, y: 2.25), controlPoint1: NSPoint(x: 1.3, y: 3.2), controlPoint2: NSPoint(x: 2.05, y: 2.25))
             path.line(to: NSPoint(x: 14.5, y: 2.25))
             path.curve(to: NSPoint(x: 16.05, y: 4.45), controlPoint1: NSPoint(x: 15.95, y: 2.25), controlPoint2: NSPoint(x: 16.7, y: 3.2))
-            path.curve(to: NSPoint(x: 10.65, y: 14.55), controlPoint1: NSPoint(x: 16.75, y: 5.95), controlPoint2: NSPoint(x: 13.2, y: 9.8))
+            path.curve(to: NSPoint(x: 10.65, y: 14.55), controlPoint1: NSPoint(x: 18.25, y: 5.95), controlPoint2: NSPoint(x: 13.2, y: 9.8))
             path.curve(to: NSPoint(x: 9, y: 15.75), controlPoint1: NSPoint(x: 10.2, y: 15.35), controlPoint2: NSPoint(x: 9.7, y: 15.75))
             path.close()
             path.move(to: NSPoint(x: 9, y: 12.3))
             path.curve(to: NSPoint(x: 8.4, y: 11.85), controlPoint1: NSPoint(x: 8.75, y: 12.3), controlPoint2: NSPoint(x: 8.55, y: 12.1))
             path.line(to: NSPoint(x: 5.05, y: 5.35))
-            path.curve(to: NSPoint(x: 6.05, y: 3.75), controlPoint1: NSPoint(x: 4.5, y: 4.3), controlPoint2: NSPoint(x: 5.0, y: 3.75))
-            path.line(to: NSPoint(x: 11.95, y: 3.75))
-            path.curve(to: NSPoint(x: 12.95, y: 5.35), controlPoint1: NSPoint(x: 13.0, y: 3.75), controlPoint2: NSPoint(x: 13.5, y: 4.3))
+            path.curve(to: NSPoint(x: 7.5, y: 4.23), controlPoint1: NSPoint(x: 4.5, y: 4.3), controlPoint2: NSPoint(x: 6.2, y: 4.23))
+            path.line(to: NSPoint(x: 10.5, y: 4.23))
+            path.curve(to: NSPoint(x: 12.95, y: 5.35), controlPoint1: NSPoint(x: 12.6, y: 4.23), controlPoint2: NSPoint(x: 13.5, y: 4.3))
             path.line(to: NSPoint(x: 9.6, y: 11.85))
             path.curve(to: NSPoint(x: 9, y: 12.3), controlPoint1: NSPoint(x: 9.45, y: 12.1), controlPoint2: NSPoint(x: 9.25, y: 12.3))
             path.close()
@@ -78,7 +81,14 @@ import LightTTSCore
     }
     private func updateContent(attached: Bool) {
         if attached {
-            popover.contentViewController = NSHostingController(rootView: CompactMenuView(controller: app, openSettings: { [weak self] in self?.showSettings() }))
+            let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.showSettings() })
+            if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
+                let hosting = NSHostingController(rootView: view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
+                hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
+                popover.contentViewController = hosting
+            } else {
+                popover.contentViewController = NSHostingController(rootView: view)
+            }
         } else {
             window?.contentView = NSHostingView(rootView: SettingsView(controller: app, detach: { [weak self] in self?.switchPresentation() }, attached: false))
         }
