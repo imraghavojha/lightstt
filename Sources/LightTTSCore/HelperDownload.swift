@@ -2,8 +2,10 @@ import Foundation
 public enum HelperDownload {
     public static func run(_ model: Model) async throws {
         let process = Process()
-        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/LightTTSEngine")
-        process.arguments = ["download", ModelStore.path(model).path, model.version ?? "v3"]
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/LightTTSEngine")
+        let sibling = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL).deletingLastPathComponent().appendingPathComponent("LightTTSEngine")
+        process.executableURL = FileManager.default.isExecutableFile(atPath: bundled.path) ? bundled : sibling
+        process.arguments = ["download-model", String(data: try JSONEncoder().encode(model), encoding: .utf8)!]
         try process.run()
         await withTaskCancellationHandler(operation: {
             await Task.detached { process.waitUntilExit() }.value

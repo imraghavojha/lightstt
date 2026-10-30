@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 import LightTTSCore
 
-private struct HelperCommand: Codable { let action: String; let reply: String; var model: Model? = nil; var audio: String? = nil }
+private struct HelperCommand: Codable { let action: String; let reply: String; var model: Model? = nil; var audio: String? = nil; var language: String? = nil }
 private struct HelperReply: Codable { let text: String?; let error: String? }
 
 private final class HelperStopState: @unchecked Sendable {
@@ -44,9 +44,9 @@ final class HelperEngine: TranscriptionEngine, @unchecked Sendable {
             if child.isRunning { kill(child.processIdentifier, SIGKILL) }
         }
     }
-    static func load(_ model: Model, onCrash: @escaping @Sendable () -> Void = {}) async throws -> HelperEngine {
+    static func load(_ model: Model, language: String = "en", onCrash: @escaping @Sendable () -> Void = {}) async throws -> HelperEngine {
         let helper = try HelperEngine(onCrash: onCrash)
-        _ = try await helper.request(action: "warm", model: model)
+        _ = try await helper.request(action: "warm", model: model, language: language)
         return helper
     }
     func transcribe(samples: [Float]) async throws -> String {
@@ -55,15 +55,15 @@ final class HelperEngine: TranscriptionEngine, @unchecked Sendable {
         try samples.withUnsafeBytes { try Data($0).write(to: audio, options: .atomic) }
         return try await request(action: "transcribe", audio: audio.path) ?? ""
     }
-    func request(action: String, model: Model? = nil, audio: String? = nil) async throws -> String? {
-        do { return try await performRequest(action: action, model: model, audio: audio) }
+    func request(action: String, model: Model? = nil, audio: String? = nil, language: String? = nil) async throws -> String? {
+        do { return try await performRequest(action: action, model: model, audio: audio, language: language) }
         catch { terminate(); throw error }
     }
-    private func performRequest(action: String, model: Model?, audio: String?) async throws -> String? {
+    private func performRequest(action: String, model: Model?, audio: String?, language: String?) async throws -> String? {
         let deadline = ProcessInfo.processInfo.systemUptime + (action == "warm" ? warmTimeout : transcribeTimeout)
         let reply = directory.appendingPathComponent(UUID().uuidString + ".json")
         defer { try? FileManager.default.removeItem(at: reply) }
-        var data = try JSONEncoder().encode(HelperCommand(action: action, reply: reply.path, model: model, audio: audio))
+        var data = try JSONEncoder().encode(HelperCommand(action: action, reply: reply.path, model: model, audio: audio, language: language))
         data.append(10)
         guard process.isRunning else { throw SpeechError.model("Speech engine exited unexpectedly. Try recording again.") }
         try input.fileHandleForWriting.write(contentsOf: data)

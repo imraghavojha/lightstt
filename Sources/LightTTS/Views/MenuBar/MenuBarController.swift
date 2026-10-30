@@ -106,6 +106,7 @@ import LightTTSCore
             window?.contentView = NSHostingView(rootView: SettingsView(controller: app, detach: { [weak self] in self?.switchPresentation() }, attached: false))
         }
     }
+    func openSettingsWindow() { showSettings() }
     private func switchPresentation() {
         window?.orderOut(nil); window = nil
         showCompact()

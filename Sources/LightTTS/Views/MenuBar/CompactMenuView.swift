@@ -44,7 +44,7 @@ struct CompactMenuView: View {
                 Menu {
                     if data.installedModels.isEmpty { Button("Open Models settings…") { controller.settingsSelection = "Models"; openSettings() } }
                     ForEach(data.installedModels) { model in
-                        Button { selectedModel = model.id; controller.warmSelected() } label: {
+                        Button { selectedModel = model.id; controller.reloadSelectedModel() } label: {
                             if model.id == selectedModel { Label(model.name, systemImage: "checkmark") }
                             else { Text(model.name) }
                         }
