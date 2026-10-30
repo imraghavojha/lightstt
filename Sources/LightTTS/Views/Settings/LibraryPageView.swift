@@ -71,12 +71,21 @@ struct LibraryPageView: View {
     private func recording(_ item: HistoryEntry) -> some View {
         let expanded = controller.selectedHistory?.id == item.id
         return VStack(alignment: .leading, spacing: 12) {
-            Button {
-                controller.stopHistoryPlayback(); controller.historySegmented = false
-                controller.selectedHistory = expanded ? nil : item
-            } label: {
-                Text(item.text).lineLimit(expanded ? nil : 2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            HStack(spacing: 8) {
+                Button {
+                    controller.stopHistoryPlayback(); controller.historySegmented = false
+                    controller.selectedHistory = expanded ? nil : item
+                } label: {
+                    Text(item.text).lineLimit(expanded ? nil : 2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                if !expanded && controller.hoveredHistoryID == item.id {
+                    Menu {
+                        Button("Copy") { copy(item) }
+                        Button("Delete", role: .destructive) { controller.deleteHistory(item.id) }
+                    } label: { Image(systemName: "ellipsis").font(.system(size: 14)) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                }
+            }
             if expanded {
                 player(item)
                 HStack {
@@ -101,6 +110,7 @@ struct LibraryPageView: View {
         }.padding(16).background(cardColor, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.05), lineWidth: 0.5))
             .opacity(controller.selectedHistory == nil || expanded ? 1 : 0.55)
+            .onHover { hovering in controller.hoveredHistoryID = hovering ? item.id : nil }
             .contextMenu { Button("Copy") { copy(item) }; Button("Delete", role: .destructive) { controller.deleteHistory(item.id); if expanded { controller.selectedHistory = nil } } }
     }
     private func player(_ item: HistoryEntry) -> some View {
