@@ -8,7 +8,7 @@ import Foundation
 final class FocusTarget: @unchecked Sendable {
     private let element: AXUIElement
     private let pid: pid_t
-    private let stopDisposition: FocusDisposition
+    let stopDisposition: FocusDisposition
 
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
