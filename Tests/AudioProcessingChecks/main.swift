@@ -1,4 +1,10 @@
 import Foundation
+precondition(AudioProcessing.recordingError(samples: [], duration: 0.1, pushToTalk: true)?.contains("delivered no audio") == true)
+precondition(AudioProcessing.recordingError(samples: [0, 0], duration: 2, pushToTalk: false)?.contains("input is silent") == true)
+precondition(AudioProcessing.recordingError(samples: [0.01], duration: 0.1, pushToTalk: true)?.contains("too short") == true)
+precondition(AudioProcessing.recordingError(samples: [0.01], duration: 0.1, pushToTalk: false)?.contains("too short") == true)
+precondition(AudioProcessing.recordingError(samples: [0.00001], duration: 2, pushToTalk: false) == nil)
+precondition(AudioProcessing.apply([Float](repeating: 0.00001, count: 16000), removeSilence: true, normalize: false).isEmpty)
 let input = [Float](repeating: 0, count: 16000) + [Float](repeating: 0.05, count: 3200) + [Float](repeating: 0, count: 16000)
 let trimmed = AudioProcessing.apply(input, removeSilence: true, normalize: false)
 precondition(trimmed.count < input.count && trimmed.contains(0.05) && trimmed.count > 3200)

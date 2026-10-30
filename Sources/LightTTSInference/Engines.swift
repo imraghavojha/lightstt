@@ -23,7 +23,7 @@ public actor WhisperCppEngine: TranscriptionEngine {
     }
     deinit { whisper_free(context) }
     public func transcribe(samples: [Float]) async throws -> String {
-        guard !samples.isEmpty else { throw SpeechError.audio("No audio captured") }
+        guard !samples.isEmpty else { throw SpeechError.audio("The transcription engine received an empty audio recording.") }
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         params.print_progress = false; params.print_realtime = false; params.print_timestamps = false
         params.no_context = true
@@ -106,7 +106,7 @@ public actor SherpaEngine: TranscriptionEngine {
     }
     deinit { SherpaOnnxDestroyOfflineRecognizer(recognizer) }
     public func transcribe(samples: [Float]) async throws -> String {
-        guard !samples.isEmpty else { throw SpeechError.audio("No audio captured") }
+        guard !samples.isEmpty else { throw SpeechError.audio("The transcription engine received an empty audio recording.") }
         var texts: [String] = []
         // The C API does not expose an abort callback. Bound each synchronous decode
         // to 20 seconds of input and check cancellation between chunks.
@@ -136,7 +136,7 @@ import Speech
 public actor AppleSpeechEngine: TranscriptionEngine {
     public init() {}
     public func transcribe(samples: [Float]) async throws -> String {
-        guard !samples.isEmpty else { throw SpeechError.audio("No audio captured") }
+        guard !samples.isEmpty else { throw SpeechError.audio("The transcription engine received an empty audio recording.") }
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { throw SpeechError.model("Apple Speech does not support the current locale") }
         let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
         guard await AssetInventory.status(forModules: [transcriber]) == .installed else { throw SpeechError.model("Install Apple Speech assets first") }

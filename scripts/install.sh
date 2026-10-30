@@ -25,18 +25,28 @@ import AppKit
 import Foundation
 let path = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.path
 let apps = NSWorkspace.shared.runningApplications.filter { $0.bundleURL?.standardizedFileURL.path == path }
-for app in apps { _ = app.terminate() }
+let pids = apps.map(\.processIdentifier)
+func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
+func signal(_ pid: pid_t, _ sig: Int32) {
+    guard alive(pid) else { return }
+    if kill(pid, sig) != 0 && errno != ESRCH {
+        fatalError("Cannot signal pid \(pid): \(String(cString: strerror(errno)))")
+    }
+}
+for app in apps where alive(app.processIdentifier) {
+    if !app.terminate() { fputs("Graceful termination request failed for pid \(app.processIdentifier)\n", stderr) }
+}
 func waitForExit(_ seconds: Int) -> Bool {
     for _ in 0..<(seconds * 10) {
-        if apps.allSatisfy({ $0.isTerminated }) { return true }
+        if pids.allSatisfy({ !alive($0) }) { return true }
         Thread.sleep(forTimeInterval: 0.1)
     }
-    return apps.allSatisfy({ $0.isTerminated })
+    return pids.allSatisfy({ !alive($0) })
 }
 if !waitForExit(10) {
-    for app in apps where !app.isTerminated { kill(app.processIdentifier, SIGTERM) }
+    for pid in pids { signal(pid, SIGTERM) }
     if !waitForExit(3) {
-        for app in apps where !app.isTerminated { kill(app.processIdentifier, SIGKILL) }
+        for pid in pids { signal(pid, SIGKILL) }
         guard waitForExit(3) else { fatalError("Cannot stop \(path)") }
     }
 }

@@ -60,6 +60,7 @@ import IOKit.ps
     private var powerSource: CFRunLoopSource?
     private var pushHeld = false
     private var pushOwnsRecording = false
+    private var recordingUsesPushToTalk = false
     private var mouseStart: Date?
     private var mouseOwnsRecording = false
     private var generation = 0
@@ -271,7 +272,7 @@ import IOKit.ps
     }
     private func handlePush(_ down: Bool) {
         pushHeld = down
-        if down { if state == "idle" { pushOwnsRecording = true; start() } }
+        if down { if state == "error" { cancel() }; if state == "idle" { pushOwnsRecording = true; start(pushToTalk: true) } }
         else if pushOwnsRecording { pushOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
     }
     private func handleMouse(_ down: Bool) {
@@ -284,8 +285,9 @@ import IOKit.ps
             if mouseOwnsRecording && Date().timeIntervalSince(startTime) >= 0.3 { mouseOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
         }
     }
-    func start() {
+    func start(pushToTalk: Bool = false) {
         guard state == "idle", historyMigration == nil, reprocessingHistoryID == nil else { return }
+        recordingUsesPushToTalk = pushToTalk
         unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         LaunchTrace.mark("recording-start-request")
@@ -343,11 +345,15 @@ import IOKit.ps
 
         LaunchTrace.mark("recording-stopped")
         let rawSamples = testAudio ?? audio?.stop() ?? []
+        let elapsed = Date().timeIntervalSince(started)
         let recordingDate = started, recordDuration = Double(rawSamples.count) / 16000
         let inputID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
         let inputName = inputID.isEmpty ? "System default" : (AVCaptureDevice.devices(for: .audio).first { $0.uniqueID == inputID }?.localizedName ?? "Microphone")
         let processingStart = Date()
         testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; runPendingHistoryReprocess(); if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
+        let usedPushToTalk = recordingUsesPushToTalk
+        recordingUsesPushToTalk = false
+        if let error = AudioProcessing.recordingError(samples: rawSamples, duration: elapsed, pushToTalk: usedPushToTalk) { fail(error); return }
 
         processing = Task {
             do {
@@ -372,6 +378,7 @@ import IOKit.ps
 
                 let remove = UserDefaults.standard.bool(forKey: "removeSilence"), normalize = UserDefaults.standard.bool(forKey: "normalizeAudio")
                 let samples = await Task.detached(priority: .userInitiated) { AudioProcessing.apply(rawSamples, removeSilence: remove, normalize: normalize) }.value
+                guard !samples.isEmpty else { throw SpeechError.audio("No speech detected. Try speaking louder or turn off silence removal.") }
                 LaunchTrace.mark("inference-start")
                 let text = try await engine.transcribe(samples: samples)
                 LaunchTrace.mark("inference-finished")
@@ -428,7 +435,7 @@ import IOKit.ps
         }
     }
 
-    func cancel() { audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide(); runPendingHistoryReprocess() }
+    func cancel() { audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; unloadEngine(); hide(); runPendingHistoryReprocess() }
 
     private func hideImmediately() {
         recordingLevel.value = 0; panel?.orderOut(nil)
@@ -477,7 +484,7 @@ import IOKit.ps
     func fail(_ text: String) {
         audioSettings.end()
         generation += 1; processing?.cancel(); processing = nil
-        _ = audio?.stop(); audio = nil; testAudio = nil; focusTask?.cancel(); focusTask = nil; recordingLevel.value = 0
+        _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; focusTask?.cancel(); focusTask = nil; recordingLevel.value = 0
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
         unloadEngine(); message = text; state = "error"; showPanel(); runPendingHistoryReprocess()
     }
@@ -696,7 +703,18 @@ import IOKit.ps
     }
     func cancelDownload() { downloadTask?.cancel() }
 
-    func prepareToQuit() async { pendingHistoryReprocess = nil; if state != "idle" { cancel() }; audioSettings.end(); unloadEngine(); await audioSettings.waitForRestoration(); await withCheckedContinuation { continuation in historyQueue.async { continuation.resume() } }; let task = downloadTask; task?.cancel(); await task?.value }
+    func beginQuit() {
+        downloadTask?.cancel(); processing?.cancel(); warming?.cancel()
+        pendingHistoryReprocess = nil
+        audioSettings.end()
+        if state != "idle" { cancel() }
+        unloadEngine()
+    }
+    func finishQuit() async {
+        await audioSettings.waitForRestoration()
+        await withCheckedContinuation { continuation in historyQueue.async { continuation.resume() } }
+        await downloadTask?.value
+    }
 
     func download(_ model: Model) {
         guard busyModel == nil else { return }

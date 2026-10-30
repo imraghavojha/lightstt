@@ -3,6 +3,14 @@ import Foundation
 struct RecordingSegment: Codable, Hashable { let start: Double; let end: Double }
 
 enum AudioProcessing {
+    static func recordingError(samples: [Float], duration: TimeInterval, pushToTalk: Bool) -> String? {
+        if samples.isEmpty { return "Microphone delivered no audio. Check the selected input and microphone access." }
+        if samples.allSatisfy({ $0 == 0 }) { return "Microphone input is silent: check the selected mic / input volume." }
+        if duration < 0.5 {
+            return pushToTalk ? "Recording was too short. Hold the push-to-talk shortcut while speaking." : "Recording was too short. Speak for at least half a second."
+        }
+        return nil
+    }
     static func waveform(_ samples: [Float], bins: Int = 48) -> [Float] {
         guard !samples.isEmpty, bins > 0 else { return [] }
         return (0..<bins).map { bin in

@@ -26,7 +26,11 @@ import Foundation
     func applicationDidBecomeActive(_ notification: Notification) { if !isUITest && !CommandLine.arguments.contains("--models-window") && AXIsProcessTrusted() { hotkeyReady = controller.installHotkey(); writeReadyMarker() } }
     func catalogDidLoad() { catalogReady = true; writeReadyMarker() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Task { await controller.prepareToQuit(); sender.reply(toApplicationShouldTerminate: true) }
+        var replied = false
+        let reply = { if !replied { replied = true; sender.reply(toApplicationShouldTerminate: true) } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reply)
+        controller.beginQuit()
+        Task { await controller.finishQuit(); reply() }
         return .terminateLater
     }
     #if DEBUG

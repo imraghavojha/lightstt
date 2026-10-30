@@ -3,6 +3,7 @@ import SwiftUI
 struct RecordingView: View {
     @ObservedObject var controller: AppController
     @ObservedObject private var level: RecordingLevel
+    @State private var hoveringError = false
     init(controller: AppController) { self.controller = controller; self.level = controller.recordingLevel }
 
     var body: some View {
@@ -24,9 +25,24 @@ struct RecordingView: View {
             } else if controller.state == "error" {
                 Image(systemName: "exclamationmark.circle").font(.system(size: 13)).foregroundStyle(.white)
                     .help(controller.message)
+                Text(controller.message).font(.system(size: 11)).foregroundStyle(.white)
+                    .lineLimit(2).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                    .help(controller.message).padding(.leading, 4)
+                Button(action: { controller.cancel() }) {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
+                }.buttonStyle(.plain).help("Dismiss")
             }
         }
-        .frame(width: idle ? 45 : (controller.state == "loading" ? 120 : 60), height: idle ? 8 : 32)
+        .contentShape(Capsule())
+        .onTapGesture { if controller.state == "error" { controller.cancel() } }
+        .onHover { hoveringError = $0 }
+        .task(id: "\(controller.state):\(controller.message):\(hoveringError)") {
+            guard controller.state == "error", !hoveringError else { return }
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if !Task.isCancelled && controller.state == "error" { controller.cancel() }
+        }
+        .padding(.horizontal, controller.state == "error" ? 14 : 0)
+        .frame(width: idle ? 45 : (controller.state == "error" ? 220 : (controller.state == "loading" ? 120 : 60)), height: idle ? 8 : (controller.state == "error" ? 56 : 32))
         .background(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255), in: Capsule())
         .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 1))
         .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)
