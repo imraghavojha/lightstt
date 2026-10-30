@@ -324,7 +324,7 @@ private struct ConfigurationApplicationRow<Content: View>: View {
     let title: String
     var help: String? = nil
     @ViewBuilder var content: Content
-    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "questionmark.circle").foregroundStyle(.secondary).help(help) }; Spacer(); content }.frame(minHeight: title == "Keep recordings for" ? 58 : (advanced ? 46 : 43)) }
+    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "questionmark.circle").foregroundStyle(.secondary).help(help) }; Spacer(); content }.frame(minHeight: title == "Keep recordings for" ? 58 : (advanced ? (title == "Voice model active duration" ? 60 : 46) : 43)) }
 }
 
 private struct PageRule: View {
