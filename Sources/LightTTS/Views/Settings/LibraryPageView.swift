@@ -99,7 +99,7 @@ struct LibraryPageView: View {
                     }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
                     action("doc.on.doc.fill", "Copy") { copy(item) }
-                    Button {} label: { Image(systemName: "arrow.clockwise").overlay(Image(systemName: "sparkle").font(.system(size: 6)), alignment: .center).frame(width: 24, height: 24) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
+                    Button {} label: { Image(systemName: "gobackward").overlay(Image(systemName: "sparkle").font(.system(size: 6)).offset(y: -1), alignment: .center).frame(width: 24, height: 24) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
                     action("info.circle", "Recording information") { state.drawer = true }
                     action("trash", "Delete") { controller.deleteHistory(item.id); controller.selectedHistory = nil }
                 }.font(.system(size: 12))
