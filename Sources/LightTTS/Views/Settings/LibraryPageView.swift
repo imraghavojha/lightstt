@@ -43,7 +43,7 @@ struct LibraryPageView: View {
         }.padding(.leading, 12).padding(.trailing, 10).frame(height: 48)
     }
     private var headerChrome: LinearGradient {
-        LinearGradient(colors: scheme == .dark ? [Color(white: 0.29), Color(white: 0.24)] : [Color.white, Color(white: 0.94)], startPoint: .top, endPoint: .bottom)
+        LinearGradient(colors: scheme == .dark ? [Color(red: 58/255, green: 60/255, blue: 66/255), Color(red: 58/255, green: 61/255, blue: 67/255)] : [Color.white, Color(white: 0.94)], startPoint: .top, endPoint: .bottom)
     }
     private var headerEdge: Color { scheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.15) }
     @ViewBuilder private var content: some View {
