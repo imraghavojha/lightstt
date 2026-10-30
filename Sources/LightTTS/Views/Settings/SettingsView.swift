@@ -179,7 +179,6 @@ private struct ConfigurationPageView: View {
     @AppStorage("removeSilence") private var removeSilence = false
     @AppStorage("normalizeAudio") private var normalizeAudio = false
     @AppStorage("historyRetentionDays") private var retention = 0
-    @AppStorage("autoCheckUpdates") private var autoCheckUpdates = false
     @AppStorage("recordOnMenubarClick") private var recordOnMenubarClick = false
     @AppStorage("closeAfterTranscription") private var closeAfterTranscription = false
     @AppStorage("clipboardHistory") private var clipboardHistory = true
