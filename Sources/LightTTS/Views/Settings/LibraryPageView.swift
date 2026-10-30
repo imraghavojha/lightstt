@@ -83,10 +83,10 @@ struct LibraryPageView: View {
                     HStack(spacing: 0) {
                         segmentButton("Original", selected: !controller.historySegmented) { controller.stopHistoryPlayback(); controller.historySegmented = false }
                         segmentButton("Segmented", selected: controller.historySegmented) { controller.stopHistoryPlayback(); controller.historySegmented = true }.disabled(item.segments?.isEmpty ?? true)
-                    }.padding(2).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                    }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
-                    action("doc.on.doc", "Copy") { copy(item) }
-                    Button {} label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).disabled(true).help("Process again is not available")
+                    action("doc.on.doc.fill", "Copy") { copy(item) }
+                    Button {} label: { Image(systemName: "sparkle") .overlay(Circle().stroke(lineWidth: 1).frame(width: 12, height: 12)) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
                     action("info.circle", "Recording information") { state.drawer = true }
                     action("trash", "Delete") { controller.deleteHistory(item.id); controller.selectedHistory = nil }
                 }.font(.system(size: 12))
@@ -106,16 +106,25 @@ struct LibraryPageView: View {
     private func player(_ item: HistoryEntry) -> some View {
         HStack(spacing: 10) {
             Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.plain).disabled(controller.historyAudioURL(item) == nil)
-            HStack(spacing: 1) {
+            GeometryReader { geometry in
                 if let waveform = item.waveform, !waveform.isEmpty {
-                    ForEach(Array(waveform.enumerated()), id: \.offset) { _, amplitude in Capsule().fill(Color.primary.opacity(0.55)).frame(width: 1, height: max(2, CGFloat(amplitude) * 20)) }
-                } else { Image(systemName: "waveform").foregroundStyle(.secondary) }
-            }.frame(maxWidth: .infinity, minHeight: 26).clipped()
+                    HStack(spacing: 0) {
+                        ForEach(Array(waveform.enumerated()), id: \.offset) { _, amplitude in
+                            Capsule().fill(Color.primary.opacity(0.55))
+                                .frame(width: 1, height: max(2, CGFloat(amplitude) * 20))
+                                .frame(width: geometry.size.width / CGFloat(waveform.count))
+                        }
+                    }.frame(height: geometry.size.height)
+                } else {
+                    Image(systemName: "waveform").foregroundStyle(.secondary)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+            }.frame(height: 26).clipped()
             Text(item.recordingDuration.map(duration) ?? "0:00").font(.caption).foregroundStyle(.secondary)
         }.padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
     private func segmentButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).padding(.horizontal, 10).padding(.vertical, 5).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(.plain)
+        Button(action: action) { Text(title).frame(maxWidth: .infinity).frame(height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(.plain)
     }
     private func action(_ icon: String, _ help: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) { Image(systemName: icon).frame(width: 24, height: 24) }.buttonStyle(.plain).help(help)
