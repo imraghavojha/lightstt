@@ -119,6 +119,7 @@ import Darwin
                 case .failure(let error): if !(error is CancellationError) { self.message = "Could not change folder: " + error.localizedDescription }
                 }
                 self.historyMigration = nil
+                self.pruneHistory()
             }
         }
     }
