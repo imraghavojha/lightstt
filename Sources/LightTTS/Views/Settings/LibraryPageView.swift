@@ -44,7 +44,7 @@ struct LibraryPageView: View {
     }
     @ViewBuilder private var content: some View {
             if state.groups.isEmpty {
-                VStack { Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).padding(.top, 135); Spacer() }.frame(maxWidth: .infinity)
+                VStack { Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).padding(.top, 133); Spacer() }.frame(maxWidth: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
