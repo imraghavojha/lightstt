@@ -1,3 +1,4 @@
+import LightTTSRuntime
 import Foundation
 import AVFoundation
 
