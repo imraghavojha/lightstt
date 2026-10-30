@@ -108,12 +108,14 @@ print("Media intent changes prevent automatic resume")
 final class FakePlayers: PlayerControlling {
     var states: [String: String] = [:]
     var permitted = true
+    var failing: Set<String> = []
+    var unresponsive: Set<String> = []
     var pauses: [String] = []
     var resumes: [String] = []
     func runningPlayers() -> [String] { Array(states.keys) }
     func authorized(_ player: String) -> Bool { permitted }
-    func state(_ player: String) -> String? { states[player] }
-    func pause(_ player: String) -> Bool { pauses.append(player); states[player] = "paused"; return true }
+    func state(_ player: String) -> String? { unresponsive.contains(player) ? nil : states[player] }
+    func pause(_ player: String) -> Bool { pauses.append(player); guard !failing.contains(player) else { return false }; states[player] = "paused"; return true }
     func resume(_ player: String) { resumes.append(player); states[player] = "playing" }
 }
 let players = FakePlayers(), playerGate = MediaGate()
@@ -132,7 +134,30 @@ try startPlayers(); players.states.removeAll(); stopPlayers()
 precondition(players.resumes.count == 1)
 players.states["music"] = "playing"; players.permitted = false
 let deniedToken = playerGate.start(); playerGate.setOperation(deniedToken)
-do { try playerSession.begin(); preconditionFailure("Expected permission failure") } catch PlayerPermissionError.missing {}
+do { try playerSession.begin(); preconditionFailure("Expected permission failure") } catch is PlayerPauseError {}
 playerGate.stop(); playerSession.end()
 precondition(players.pauses.count == 3 && players.resumes.count == 1)
 print("Player permission and lifecycle checks passed")
+
+for unresponsive in [false, true] {
+    let failingPlayers = FakePlayers(), failingGate = MediaGate()
+    failingPlayers.states = ["good": "playing", "bad": "playing"]
+    if unresponsive { failingPlayers.unresponsive.insert("bad") } else { failingPlayers.failing.insert("bad") }
+    let session = MediaPauseSession(controller: PlayerMediaController(players: failingPlayers, gate: failingGate))
+    let token = failingGate.start(); failingGate.setOperation(token)
+    do { try session.begin(); preconditionFailure("Expected fallback") } catch is PlayerPauseError {}
+    failingGate.stop(); session.end()
+    precondition(failingPlayers.resumes == ["good"])
+}
+print("Player failures retain ownership for restoration")
+let slowGate = MediaGate(), entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), done = DispatchSemaphore(value: 0)
+let slowToken = slowGate.start(); slowGate.setOperation(slowToken)
+DispatchQueue.global().async {
+    _ = slowGate.ifActive { entered.signal(); release.wait(); return true }
+    done.signal()
+}
+entered.wait()
+let start = Date(); slowGate.stop(); _ = slowGate.start()
+precondition(Date().timeIntervalSince(start) < 0.1)
+release.signal(); done.wait()
+print("Slow player send does not block recording transitions")

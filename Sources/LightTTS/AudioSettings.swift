@@ -80,7 +80,7 @@ final class AudioSettings: @unchecked Sendable {
                 if !testAudio { applyOutputVolume(factor: 0) }
                 if !warnedAboutAutomation {
                     warnedAboutAutomation = true
-                    return "Media muted. Grant Automation permission in Settings to pause players."
+                    return "Media muted. Check player availability and Automation permission in Settings."
                 }
                 return nil
             }
@@ -267,18 +267,20 @@ private struct SystemPlayerController: PlayerControlling {
             guard let object = specifier.coerce(toDescriptorType: code("obj ")) else { return nil }
             event.setParam(object, forKeyword: code("----"))
         }
-        return try? event.sendEvent(options: .waitForReply, timeout: 1)
+        return try? event.sendEvent(options: [.waitForReply, NSAppleEventDescriptor.SendOptions(rawValue: UInt(kAEDoNotPromptForUserConsent))], timeout: 1)
     }
     func state(_ player: String) -> String? {
         guard let result = send("core", "getd", player: player, property: true)?.paramDescriptor(forKeyword: code("----")) else { return nil }
         switch result.enumCodeValue {
         case code("kPSP"): return "playing"
         case code("kPSp"): return "paused"
+        case code("kPSS"): return "stopped"
         default: return nil
         }
     }
-    func pause(_ player: String) -> Bool { send("hook", "Paus", player: player) != nil }
-    func resume(_ player: String) { _ = send("hook", "Play", player: player) }
+    func pause(_ player: String) -> Bool { send(eventClass(player), "Paus", player: player) != nil }
+    func resume(_ player: String) { _ = send(eventClass(player), "Play", player: player) }
+    private func eventClass(_ player: String) -> String { bundle(player) == "com.spotify.client" ? "spfy" : "hook" }
 }
 
 private final class PermissionResult: @unchecked Sendable {

@@ -32,7 +32,11 @@ final class MediaPauseSession {
     private var paused: [String] = []
     private var active = false
     init(controller: any MediaControlling) { self.controller = controller }
-    func begin() throws { guard !active else { return }; paused = try controller.pausePlaying(); active = true }
+    func begin() throws {
+        guard !active else { return }
+        do { paused = try controller.pausePlaying(); active = true }
+        catch let error as PlayerPauseError { paused = error.paused; active = true; throw error }
+    }
     func end() { guard active else { return }; active = false; controller.resume(paused); paused.removeAll() }
 }
 
@@ -50,7 +54,7 @@ protocol PlayerControlling {
     func resume(_ player: String)
 }
 
-enum PlayerPermissionError: Error { case missing }
+struct PlayerPauseError: Error { let paused: [String] }
 
 final class PlayerMediaController: MediaControlling {
     private let players: any PlayerControlling
@@ -58,11 +62,18 @@ final class PlayerMediaController: MediaControlling {
     init(players: any PlayerControlling, gate: MediaGate) { self.players = players; self.gate = gate }
     func pausePlaying() throws -> [String] {
         let running = players.runningPlayers()
-        guard running.allSatisfy({ players.authorized($0) }) else { throw PlayerPermissionError.missing }
         var paused: [String] = []
-        for player in running where players.state(player) == "playing" {
-            if gate.ifActive({ players.pause(player) }) { paused.append(player) }
+        var failed = false
+        for player in running {
+            guard players.authorized(player), let state = players.state(player) else { failed = true; continue }
+            if state == "playing" {
+                if gate.ifActive({ players.pause(player) }) { paused.append(player) }
+                else { failed = true }
+                // Retain ownership even if the recording ended while pause was in flight.
+                if !gate.operationIsActive() { break }
+            }
         }
+        if failed { throw PlayerPauseError(paused: paused) }
         return paused
     }
     func resume(_ paused: [String]) {
@@ -103,6 +114,20 @@ final class MediaGate: @unchecked Sendable {
     func start() -> Int { lock.lock(); defer { lock.unlock() }; generation += 1; active = true; return generation }
     func stop() { lock.lock(); if active { generation += 1; active = false }; lock.unlock() }
     func isCurrent(_ token: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == token }
-    func ifActive(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == operation && action() }
-    func ifStopped(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return !active && generation == operation + 1 && action() }
+    func operationIsActive() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return active && generation == operation
+    }
+    func ifActive(_ action: () -> Bool) -> Bool {
+        operationIsActive() && action()
+    }
+    private func operationIsStopped() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !active && generation == operation + 1
+    }
+    func ifStopped(_ action: () -> Bool) -> Bool {
+        guard operationIsStopped() else { return false }
+        let result = action()
+        return operationIsStopped() && result
+    }
 }
