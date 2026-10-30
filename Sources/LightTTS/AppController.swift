@@ -236,9 +236,7 @@ import Darwin
             pressed = true
             if state == "error" { cancel() }
             if UserDefaults.standard.bool(forKey: "pushToTalk") { if state == "idle" { shortcutOwnsRecording = true; start() } }
-            else if state == "starting" { cancel() }
-            else if state == "recording" { stop() }
-            else if state == "idle" { start() }
+            else { toggleRecording() }
         } else if !down && pressed {
             pressed = false
             if shortcutOwnsRecording {
@@ -246,6 +244,12 @@ import Darwin
                 if state == "starting" { cancel() } else if state == "recording" { stop() }
             }
         }
+    }
+    func toggleRecording() {
+        if state == "error" { cancel() }
+        if state == "starting" { cancel() }
+        else if state == "recording" { stop() }
+        else if state == "idle" { start() }
     }
     private func handlePush(_ down: Bool) {
         pushHeld = down

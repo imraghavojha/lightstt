@@ -49,6 +49,7 @@ import Foundation
 }
 @main struct LightTTSApp {
     @MainActor static func main() {
+        if let other = NSRunningApplication.runningApplications(withBundleIdentifier: "com.lighttts.app").first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated }) { other.activate(options: [.activateIgnoringOtherApps]); return }
         LaunchTrace.mark("main-entry")
         let app = NSApplication.shared; app.setActivationPolicy(.accessory); LaunchTrace.mark("appkit-ready")
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] { app.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua) }
