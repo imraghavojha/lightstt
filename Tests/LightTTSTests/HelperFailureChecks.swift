@@ -39,6 +39,19 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         defaults.set(-1, forKey: "mouseShortcut")
         NotificationCenter.default.post(name: .shortcutsChanged, object: nil)
         precondition(toggle.title.contains("Space") && push.title == "Record shortcut" && mouse.title == "Record shortcut", "shortcut labels must refresh immediately")
+        let replyScript = try script(#"while IFS= read -r line; do printf '%s\n' '{"text":"ok"}'; done"#)
+        defer { try? FileManager.default.removeItem(at: replyScript) }
+        let responsive = try HelperEngine(executableURL: replyScript, warmTimeout: 1)
+        let response = try await responsive.request(action: "warm")
+        precondition(response == "ok", "pipe reply should be decoded")
+        responsive.terminate()
+        let exitScript = try script("read line\nexit 1")
+        defer { try? FileManager.default.removeItem(at: exitScript) }
+        let exited = try HelperEngine(executableURL: exitScript, warmTimeout: 3)
+        let exitStart = ProcessInfo.processInfo.systemUptime
+        do { _ = try await exited.request(action: "warm"); fatalError("expected helper exit") }
+        catch { precondition(error.localizedDescription.contains("exited unexpectedly")) }
+        precondition(ProcessInfo.processInfo.systemUptime - exitStart < 2, "helper exit must wake a pending request")
         let url = try script("trap '' TERM\nwhile :; do sleep 1; done")
         defer { try? FileManager.default.removeItem(at: url) }
         let helper = try HelperEngine(executableURL: url, warmTimeout: 0.1)

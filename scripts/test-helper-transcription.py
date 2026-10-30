@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import re
+import select
 import struct
 import subprocess
 import sys
@@ -24,17 +25,15 @@ with tempfile.TemporaryDirectory(prefix='lighttts-transcription-') as temp:
     root = pathlib.Path(temp)
     audio = root / 'audio.pcm'
     audio.write_bytes(struct.pack('<' + 'f' * len(samples), *(s / 32768 for s in samples)))
-    with subprocess.Popen([helper], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True) as process:
+    with subprocess.Popen([helper], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True) as process:
         def request(command):
-            reply = root / (str(time.monotonic_ns()) + '.json')
-            process.stdin.write(json.dumps(dict(command, reply=str(reply))) + '\n')
+            process.stdin.write(json.dumps(command) + '\n')
             process.stdin.flush()
-            deadline = time.monotonic() + 120
-            while not reply.exists():
-                if process.poll() is not None or time.monotonic() >= deadline:
-                    raise RuntimeError('Helper exited or timed out')
-                time.sleep(.02)
-            result = json.loads(reply.read_text())
+            if not select.select([process.stdout], [], [], 120)[0]:
+                raise RuntimeError('Helper timed out')
+            line = process.stdout.readline()
+            if not line: raise RuntimeError('Helper exited')
+            result = json.loads(line)
             if result.get('error'): raise RuntimeError(result['error'])
             return result
         request(dict(action='warm', model=dict(id='whisper-tiny.en', name='Whisper Tiny EN', engine='whisper')))

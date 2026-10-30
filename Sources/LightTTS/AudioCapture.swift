@@ -54,8 +54,10 @@ final class AudioCapture {
     }
     var isActive: Bool { lock.lock(); defer { lock.unlock() }; return active }
     func stop() -> [Float] {
+        LaunchTrace.mark("capture-stop-start")
         lock.lock(); active = false; let result = samples; lock.unlock()
         if !usesTestFile { engine.inputNode.removeTap(onBus: 0); engine.stop() }
+        LaunchTrace.mark("capture-stop-end")
         return result
     }
 }

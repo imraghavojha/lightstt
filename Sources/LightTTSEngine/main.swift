@@ -32,6 +32,7 @@ import LightTTSInference
         var engine: (any TranscriptionEngine)?
         while let line = readLine(), let data = line.data(using: .utf8) {
             guard let command = try? JSONDecoder().decode(Command.self, from: data) else { continue }
+            trace("helper-received-\(command.action)")
             var response = Reply(text: nil, error: nil)
             do {
                 switch command.action {
@@ -48,16 +49,26 @@ import LightTTSInference
                     #endif
                 case "transcribe":
                     guard let engine, let path = command.audio else { throw SpeechError.model("Engine is not ready") }
+                    trace("helper-pcm-read-start")
                     let data = try Data(contentsOf: URL(fileURLWithPath: path))
                     guard data.count % MemoryLayout<Float>.size == 0 else { throw SpeechError.audio("Invalid PCM data") }
                     let samples = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                    trace("helper-pcm-read-end")
+                    trace("helper-inference-start")
                     response.text = try await engine.transcribe(samples: samples)
+                    trace("helper-inference-end")
                 default: throw SpeechError.model("Unknown helper command")
                 }
             } catch { response.error = error.localizedDescription }
-            if let result = try? JSONEncoder().encode(response) { try? result.write(to: URL(fileURLWithPath: command.reply), options: .atomic) }
+            if let result = try? JSONEncoder().encode(response) {
+                if let reply = command.reply { try? result.write(to: URL(fileURLWithPath: reply), options: .atomic) }
+                else { try? FileHandle.standardOutput.write(contentsOf: result + Data([10])) }
+            }
         }
     }
 }
-struct Command: Codable { let action: String; let reply: String; var model: Model?; var audio: String?; var language: String? }
+func trace(_ stage: String) {
+    if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { fputs("LightTTS trace: \(stage) mach=\(mach_absolute_time())\n", stderr) }
+}
+struct Command: Codable { let action: String; let reply: String?; var model: Model?; var audio: String?; var language: String? }
 struct Reply: Codable { var text: String?; var error: String? }
