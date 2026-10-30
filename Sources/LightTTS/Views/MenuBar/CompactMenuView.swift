@@ -7,13 +7,17 @@ import SwiftUI
     @Published var devices: [InputDevice] = []
     @Published var defaultName = "Microphone"
     @Published var installedModels: [Model] = []
+    private var generation = 0
     func load(models: [Model]) {
+        generation += 1
+        let current = generation
         DispatchQueue.global(qos: .userInitiated).async {
             let installed = models.filter { ModelStore.exists($0) }
             let available = InputDevice.available
             let systemName = AVCaptureDevice.default(for: .audio)?.localizedName ?? "Microphone"
             DispatchQueue.main.async { [weak self] in
-                self?.installedModels = installed; self?.devices = available; self?.defaultName = systemName
+                guard let self, self.generation == current else { return }
+                self.installedModels = installed; self.devices = available; self.defaultName = systemName
             }
         }
     }
@@ -27,7 +31,7 @@ struct CompactMenuView: View {
     @AppStorage("inputDeviceUID") private var selectedInput = ""
     @AppStorage("autoPaste") private var autoPaste = true
     @AppStorage("pushShortcutEnabled") private var pushShortcutEnabled = false
-    @StateObject private var data = CompactMenuData()
+    @ObservedObject var data: CompactMenuData
     private var modelName: String { data.installedModels.first { $0.id == selectedModel }?.name ?? "Choose a model…" }
     private var inputName: String { data.devices.first { $0.id == selectedInput }?.name ?? "\(data.defaultName) (Default)" }
 
@@ -69,7 +73,7 @@ struct CompactMenuView: View {
                         }
                     }
                 } label: { Text(inputName).lineLimit(1).truncationMode(.middle) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).help(inputName)
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
             }.padding(.horizontal, 14).frame(height: 34)
 
@@ -86,7 +90,7 @@ struct CompactMenuView: View {
         .padding(.vertical, 7)
         .frame(width: 292)
         .background(colorScheme == .dark ? Color(red: 0.125, green: 0.125, blue: 0.125) : Color(red: 0.96, green: 0.96, blue: 0.96))
-        .onAppear { data.load(models: controller.models) }
+
         .onChange(of: controller.models) { models in data.load(models: models) }
     }
 }

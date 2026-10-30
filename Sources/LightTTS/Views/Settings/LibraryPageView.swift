@@ -6,6 +6,9 @@ struct LibraryPageView: View {
     @ObservedObject var controller: AppController
     @Environment(\.colorScheme) private var scheme
     @StateObject private var state = LibraryState()
+    @State private var hoveredID: UUID?
+    @State private var selected: HistoryEntry?
+    @State private var audioAvailable = false
 
     private var cardColor: Color { scheme == .dark ? Color(red: 60/255, green: 63/255, blue: 67/255) : Color(white: 253/255) }
     var body: some View {
@@ -14,7 +17,7 @@ struct LibraryPageView: View {
                 header
                 content
             }
-            if state.drawer, let item = controller.selectedHistory {
+            if state.drawer, let item = selected {
                 Color.black.opacity(0.22).onTapGesture { state.drawer = false }
                 metadata(item).frame(width: 300).transition(.move(edge: .trailing))
             }
@@ -23,9 +26,23 @@ struct LibraryPageView: View {
             if CommandLine.arguments.contains("--ui-fixture"), ProcessInfo.processInfo.environment["LIGHTTTS_LIBRARY_STRESS"] == "1", !history.isEmpty, history.count < 5000 {
                 let now = Date()
                 DispatchQueue.main.async { controller.history = (0..<5000).map { HistoryEntry(text: "Synthetic recording \($0): a sample transcription for scrolling and search.", date: now.addingTimeInterval(Double(-$0 * 60))) } }
-            } else { rebuildGroups(history, query: query) }
+            } else {
+                if let current = selected { selected = history.first { $0.id == current.id } }
+                rebuildGroups(history, query: query)
+            }
         }
-        .onChange(of: controller.selectedHistory?.id) { _ in state.drawer = false }
+        .onChange(of: selected?.id) { _ in
+            state.drawer = false
+            audioAvailable = false
+            guard let item = selected, let file = item.audioFile, file == item.id.uuidString + ".wav" else { return }
+            let url = controller.historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true).appendingPathComponent(file)
+            DispatchQueue.global(qos: .utility).async {
+                let exists = FileManager.default.fileExists(atPath: url.path)
+                DispatchQueue.main.async { if selected?.id == item.id { audioAvailable = exists } }
+            }
+        }
+        .onAppear { selected = controller.selectedHistory }
+        .onDisappear { state.task?.cancel() }
     }
     private var header: some View {
         HStack(spacing: 10) {
@@ -46,26 +63,49 @@ struct LibraryPageView: View {
         LinearGradient(colors: scheme == .dark ? [Color(red: 58/255, green: 60/255, blue: 66/255), Color(red: 58/255, green: 61/255, blue: 67/255)] : [Color.white, Color(white: 0.94)], startPoint: .top, endPoint: .bottom)
     }
     private var headerEdge: Color { scheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.15) }
-    @ViewBuilder private var content: some View {
-            if state.groups.isEmpty {
-                VStack { Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).padding(.top, 133); Spacer() }.frame(maxWidth: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+    private var content: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    Color.clear.frame(height: 0).id("library-top")
+                    if state.loading {
+                        ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(.top, 133)
+                    } else if state.groups.isEmpty {
+                        Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).frame(maxWidth: .infinity).padding(.top, 133)
+                    } else {
                         ForEach(state.groups) { group in
                             Text(dayLabel(group.date)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).padding(.leading, 3).padding(.top, 8)
-                            ForEach(group.entries) { item in
-                                recording(item)
-                            }
+                            ForEach(group.entries) { item in recording(item) }
                         }
-                    }.padding(.leading, 24).padding(.trailing, 33).padding(.top, 20).padding(.bottom, 20)
-                }.id(controller.historySearch)
-            }
+                    }
+                }.padding(.leading, 24).padding(.trailing, 33).padding(.top, 20).padding(.bottom, 20)
+            }.onChange(of: controller.historySearch) { _ in proxy.scrollTo("library-top", anchor: .top) }
+        }
     }
     private func rebuildGroups(_ history: [HistoryEntry], query: String) {
-        let entries = query.isEmpty ? history : history.filter { $0.text.localizedCaseInsensitiveContains(query) }
-        let grouped = Dictionary(grouping: entries) { Calendar.current.startOfDay(for: $0.date) }
-        state.groups = grouped.keys.sorted(by: >).map { HistoryGroup(date: $0, entries: grouped[$0]!.sorted { $0.date > $1.date }) }
+        state.generation += 1
+        let generation = state.generation
+        state.task?.cancel()
+        state.loading = true
+        let started = ProcessInfo.processInfo.systemUptime
+        state.task = Task {
+            do { try await Task.sleep(nanoseconds: 120_000_000) } catch { return }
+            let worker = Task.detached(priority: .userInitiated) { () -> [HistoryGroup]? in
+                var grouped: [Date: [HistoryEntry]] = [:]
+                let calendar = Calendar.current
+                for entry in history {
+                    if Task.isCancelled { return nil }
+                    if query.isEmpty || entry.text.localizedCaseInsensitiveContains(query) { grouped[calendar.startOfDay(for: entry.date), default: []].append(entry) }
+                }
+                if Task.isCancelled { return nil }
+                return grouped.keys.sorted(by: >).map { HistoryGroup(date: $0, entries: grouped[$0]!.sorted { $0.date > $1.date }) }
+            }
+            let groups = await withTaskCancellationHandler(operation: { await worker.value }, onCancel: { worker.cancel() })
+            guard !Task.isCancelled, generation == state.generation, let groups else { return }
+            state.groups = groups
+            state.loading = false
+            UITrace.duration("library-group-\(history.count)", since: started)
+        }
     }
     private func dayLabel(_ date: Date) -> String {
         if Calendar.current.isDateInToday(date) { return "Today" }
@@ -73,16 +113,16 @@ struct LibraryPageView: View {
         return date.formatted(date: .abbreviated, time: .omitted)
     }
     private func recording(_ item: HistoryEntry) -> some View {
-        let expanded = controller.selectedHistory?.id == item.id
+        let expanded = selected?.id == item.id
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Button {
                     controller.stopHistoryPlayback(); controller.historySegmented = false
-                    controller.selectedHistory = expanded ? nil : item
+                    selected = expanded ? nil : item
                 } label: {
                     Text(item.text).lineLimit(expanded ? nil : 2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain)
-                if !expanded && controller.hoveredHistoryID == item.id {
+                if !expanded && hoveredID == item.id {
                     Menu {
                         Button("Copy") { copy(item) }
                         Button("Delete", role: .destructive) { controller.deleteHistory(item.id) }
@@ -99,9 +139,9 @@ struct LibraryPageView: View {
                     }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
                     action("doc.on.doc.fill", "Copy") { copy(item) }
-                    Button { controller.processHistoryAgain(item) } label: { if controller.reprocessingHistoryID == item.id { ProgressView().controlSize(.small).frame(width: 24, height: 24) } else { Image(systemName: "gobackward").overlay(Image(systemName: "sparkle").font(.system(size: 6)).offset(y: -1), alignment: .center).frame(width: 24, height: 24) } }.buttonStyle(.plain).disabled(controller.historyAudioURL(item) == nil || controller.reprocessingHistoryID != nil || controller.historyMigration != nil).help(controller.historyAudioURL(item) == nil ? "Recording audio is unavailable" : "Process again")
+                    Button { controller.processHistoryAgain(item) } label: { if controller.reprocessingHistoryID == item.id { ProgressView().controlSize(.small).frame(width: 24, height: 24) } else { Image(systemName: "gobackward").overlay(Image(systemName: "sparkle").font(.system(size: 6)).offset(y: -1), alignment: .center).frame(width: 24, height: 24) } }.buttonStyle(.plain).disabled(!audioAvailable || controller.reprocessingHistoryID != nil || controller.historyMigration != nil).help(!audioAvailable ? "Recording audio is unavailable" : "Process again")
                     action("info.circle", "Recording information") { state.drawer = true }
-                    action("trash", "Delete") { controller.deleteHistory(item.id); controller.selectedHistory = nil }
+                    action("trash", "Delete") { controller.deleteHistory(item.id); selected = nil }
                 }.font(.system(size: 12))
                 if let error = controller.historyProcessingError, error.id == item.id { Text(error.message).font(.caption).foregroundStyle(.red) }
                 if controller.historySegmented, let segments = item.segments {
@@ -114,13 +154,13 @@ struct LibraryPageView: View {
             }
         }.padding(16).background(cardColor, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.05), lineWidth: 0.5))
-            .opacity(controller.selectedHistory == nil || expanded ? 1 : 0.55)
-            .onHover { hovering in controller.hoveredHistoryID = hovering ? item.id : nil }
-            .contextMenu { Button("Copy") { copy(item) }; Button("Delete", role: .destructive) { controller.deleteHistory(item.id); if expanded { controller.selectedHistory = nil } } }
+            .opacity(selected == nil || expanded ? 1 : 0.55)
+            .onHover { hovering in hoveredID = hovering ? item.id : nil }
+            .contextMenu { Button("Copy") { copy(item) }; Button("Delete", role: .destructive) { controller.deleteHistory(item.id); if expanded { selected = nil } } }
     }
     private func player(_ item: HistoryEntry) -> some View {
         HStack(spacing: 10) {
-            Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.plain).disabled(controller.historyAudioURL(item) == nil)
+            Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.plain).disabled(!audioAvailable)
             GeometryReader { geometry in
                 if let waveform = item.waveform, !waveform.isEmpty {
                     HStack(spacing: 0) {
@@ -199,4 +239,7 @@ private struct HistoryGroup: Identifiable { let date: Date; let entries: [Histor
 private final class LibraryState: ObservableObject {
     @Published var groups: [HistoryGroup] = []
     @Published var drawer = false
+    @Published var loading = true
+    var task: Task<Void, Never>?
+    var generation = 0
 }
