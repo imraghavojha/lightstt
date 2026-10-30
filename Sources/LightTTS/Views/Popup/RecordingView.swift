@@ -1,16 +1,35 @@
 import SwiftUI
+
 struct RecordingView: View {
     @ObservedObject var controller: AppController
+
     var body: some View {
-        HStack(spacing: 12) {
+        let idle = controller.state == "idle"
+        HStack(spacing: 2) {
             if controller.state == "recording" {
-                Circle().fill(.red).frame(width: 8, height: 8)
-                HStack(spacing: 3) { ForEach(0..<20) { i in Capsule().fill(.primary).frame(width: 3, height: max(3, CGFloat(controller.level) * CGFloat(12 + (i % 5) * 4))) } }.frame(height: 34)
-                TimelineView(.periodic(from: .now, by: 1)) { _ in Text(timerInterval: controller.started...Date.distantFuture, countsDown: false).monospacedDigit().frame(width: 58) }
-            } else if controller.state == "processing" { ProgressView().controlSize(.small); Text("Processing…") }
-            else if controller.state == "error" { Image(systemName: "exclamationmark.circle"); Text(controller.message).font(.caption).lineLimit(2) }
-            else { Image(systemName: "checkmark"); Text("Done") }
-            Spacer(minLength: 0)
-        }.padding(.horizontal, 18).frame(width: 300, height: 64).background(.regularMaterial, in: Capsule())
+                HStack(spacing: 2) {
+                    ForEach(0..<6) { index in
+                        Capsule().fill(.white)
+                            .frame(width: 2, height: max(2, 2 + CGFloat(controller.level) * [6, 10, 14, 14, 10, 6][index]))
+                    }
+                }.offset(x: -1)
+            } else if controller.state == "processing" {
+                ProgressView().controlSize(.mini).environment(\.colorScheme, .dark)
+            } else if controller.state == "done" {
+                Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+            } else if controller.state == "error" {
+                Image(systemName: "exclamationmark.circle").font(.system(size: 13)).foregroundStyle(.white)
+                    .help(controller.message)
+            }
+        }
+        .frame(width: idle ? 45 : 60, height: idle ? 8 : 32)
+        .background(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255), in: Capsule())
+        .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 1))
+        .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)
+        .offset(y: idle ? 0 : -9.5)
+        .animation(.easeOut(duration: 0.15), value: idle)
+        .animation(.easeOut(duration: 0.08), value: controller.level)
+        .frame(width: 240, height: 160)
+        .accessibilityLabel(controller.state == "error" ? controller.message : controller.state.capitalized)
     }
 }

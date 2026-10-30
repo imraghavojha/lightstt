@@ -26,7 +26,9 @@ import LightTTSCore
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
     private var focus: FocusTarget?
+    private var sessionAutoPaste = true
     private var testAudio: [Float]?
+    private var defaultsObserver: NSObjectProtocol?
     private var pressed = false
     private var generation = 0
     private let historyURL = ModelStore.directory.deletingLastPathComponent().appendingPathComponent("history.json")
@@ -41,6 +43,13 @@ import LightTTSCore
                 return (catalog + custom, Array(history.prefix(500)))
             }.value
             self.models = data.0; self.history = data.1; LaunchTrace.mark("catalog-ready"); self.onCatalogReady?()
+        }
+        if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
+        defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state == "idle", ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] == nil else { return }
+                if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.panel?.orderOut(nil) }
+            }
         }
         #if DEBUG
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
@@ -85,6 +94,7 @@ import LightTTSCore
     private func handleShortcut(_ down: Bool) {
         if down && !pressed {
             pressed = true
+            if state == "error" { cancel() }
             if UserDefaults.standard.bool(forKey: "pushToTalk") { start() }
             else if state == "starting" { cancel() }
             else if state == "recording" { stop() }
@@ -100,13 +110,23 @@ import LightTTSCore
         guard state == "idle" else { return }
         generation += 1; let current = generation
         state = "starting"
+        sessionAutoPaste = UserDefaults.standard.object(forKey: "autoPaste") as? Bool ?? true
         focus = nil
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+            do {
+                let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
+                try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
+            } catch { fail(error.localizedDescription) }
+            return
+        }
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         Task {
-            let target = await Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }.value
-            guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
-            guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
-            focus = target
+            if sessionAutoPaste {
+                let target = await Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }.value
+                guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
+                guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
+                focus = target
+            }
             #if DEBUG
             if let path = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? ProcessInfo.processInfo.environment["LIGHTTTS_TEST_WAV"] {
                 do { testAudio = try AudioFileReader.read(URL(fileURLWithPath: path)); started = Date(); state = "recording"; showPanel() } catch { fail(error.localizedDescription) }
@@ -147,9 +167,19 @@ import LightTTSCore
                 let text = try await engine.transcribe(samples: samples)
                 guard current == generation else { return }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
-                guard AXIsProcessTrusted() else { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary); throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
-                guard let target = focus else { throw SpeechError.audio("The focused field is unavailable.") }
-                try await Task.detached(priority: .userInitiated) { try target.insert(text) }.value
+                if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+                    print("LIGHTTTS_TEST transcription completed, samples: \(samples.count)")
+                    state = "done"
+                    try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
+                    return
+                }
+                if sessionAutoPaste {
+                    guard AXIsProcessTrusted() else { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary); throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
+                    guard let target = focus else { throw SpeechError.audio("The focused field is unavailable.") }
+                    try await Task.detached(priority: .userInitiated) { try target.insert(text) }.value
+                } else {
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+                }
                 try Task.checkCancellation(); guard current == generation else { return }
                 history.insert(HistoryEntry(text: text, date: Date()), at: 0); if history.count > 500 { history.removeLast(history.count - 500) }; saveHistory(); state = "done"
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
@@ -157,15 +187,30 @@ import LightTTSCore
         }
     }
     func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; hide() }
-    private func hide() { panel?.orderOut(nil); state = "idle"; level = 0 }
+    private func hide() {
+        state = "idle"; level = 0
+        if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
+        else if let panel {
+            let current = generation
+            NSAnimationContext.runAnimationGroup { context in context.duration = 0.12; panel.animator().alphaValue = 0 } completionHandler: { [weak self, weak panel] in
+                Task { @MainActor in
+                    guard let self, self.generation == current, self.state == "idle", !UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") else { return }
+                    panel?.orderOut(nil)
+                }
+            }
+        }
+    }
+    func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; level = 0; showPanel() }
     private func fail(_ text: String) { message = text; state = "error"; showPanel() }
     private func showPanel() {
         if panel == nil {
-            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 64), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
-            p.isFloatingPanel = true; p.level = .floating; p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = true
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+            p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
             p.contentView = NSHostingView(rootView: RecordingView(controller: self)); panel = p
         }
-        if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70)); p.orderFrontRegardless() }
+        if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70));
+            if !p.isVisible { p.alphaValue = 0; p.orderFrontRegardless(); NSAnimationContext.runAnimationGroup { context in context.duration = 0.15; p.animator().alphaValue = 1 } }
+            else { p.alphaValue = 1 } }
     }
     private func saveHistory() { try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true); if let data = try? JSONEncoder().encode(history) { try? data.write(to: historyURL, options: .atomic) } }
     func importLocalModel() {
