@@ -10,6 +10,14 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         return url
     }
     @MainActor static func main() async throws {
+        precondition(focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: true, sameWindow: true, originalRole: nil, currentRole: nil))
+        precondition(focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: true, originalRole: "AXTextArea", currentRole: "AXTextArea"))
+        precondition(!focusTargetMatches(originalPID: 1, currentPID: 2, sameElement: true, sameWindow: true, originalRole: "AXTextArea", currentRole: "AXTextArea"))
+        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: true, sameWindow: false, originalRole: "AXTextArea", currentRole: "AXTextArea"))
+        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: true, originalRole: "AXTextArea", currentRole: "AXTextField"))
+        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: true, originalRole: nil, currentRole: nil))
+        precondition(focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: true, sameWindow: nil, originalRole: nil, currentRole: nil))
+        precondition(!focusTargetMatches(originalPID: 1, currentPID: 1, sameElement: false, sameWindow: nil, originalRole: "AXTextArea", currentRole: "AXTextArea"))
         let defaults = SettingsDefaults.store
         let keys = ["hotkeyCode", "hotkeyModifiers", "rightOption", "pushShortcutEnabled", "mouseShortcut"]
         let saved = keys.map { defaults.object(forKey: $0) }

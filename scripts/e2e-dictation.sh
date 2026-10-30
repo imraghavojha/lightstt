@@ -32,31 +32,39 @@ sleep 1
 "$work/hotkey"
 sleep 1
 afplay "$work/speech.aiff"
-start=$(python3 -c 'import time; print(time.monotonic_ns())')
-"$work/hotkey"
-for ((i=0; i<240; i++)); do
-    "$work/textedit" text > "$work/transcript.txt"
-    if python3 - "$work/transcript.txt" <<'PYMATCH'
-import difflib, re, sys
+# Bound each Apple event as well as the polling loop by the same monotonic deadline.
+python3 - "$work/hotkey" "$work/textedit" <<'PYWAIT'
+import difflib, re, subprocess, sys, time
+
+hotkey, textedit = sys.argv[1:]
+start = time.monotonic()
+deadline = start + 120
 expected = re.findall(r"\w+", "the quick brown fox jumps over the lazy dog".casefold())
-actual = re.findall(r"\w+", open(sys.argv[1], encoding="utf-8").read().casefold())
-matched = 0
-for word in expected:
-    candidates = [(difflib.SequenceMatcher(None, word, candidate).ratio(), i)
-                  for i, candidate in enumerate(actual)]
-    if candidates:
-        score, index = max(candidates)
-        if score >= 0.65:
-            matched += 1
-            actual.pop(index)
-sys.exit(0 if matched / len(expected) >= 0.8 else 1)
-PYMATCH
-    then
-        end=$(python3 -c 'import time; print(time.monotonic_ns())')
-        echo "PASS: transcription appeared $(((end-start)/1000000)) ms after stop"
-        exit 0
-    fi
-    sleep 0.5
-done
-echo 'FAIL: transcription not found within 120 seconds' >&2
-exit 1
+try:
+    subprocess.run([hotkey], check=True, timeout=max(0.001, deadline - time.monotonic()))
+    while time.monotonic() < deadline:
+        result = subprocess.run([textedit, "text"], check=True, capture_output=True, text=True,
+                                timeout=max(0.001, deadline - time.monotonic()))
+        appeared = time.monotonic()
+        actual = re.findall(r"\w+", result.stdout.casefold())
+        matched = 0
+        for word in expected:
+            candidates = [(difflib.SequenceMatcher(None, word, candidate).ratio(), i)
+                          for i, candidate in enumerate(actual)]
+            if candidates:
+                score, index = max(candidates)
+                if score >= 0.65:
+                    matched += 1
+                    actual.pop(index)
+        if matched / len(expected) >= 0.8 and appeared <= deadline:
+            print(f"PASS: transcription appeared {int((appeared - start) * 1000)} ms after stop")
+            sys.exit(0)
+        time.sleep(min(0.5, max(0, deadline - time.monotonic())))
+except subprocess.TimeoutExpired:
+    pass
+except subprocess.CalledProcessError as error:
+    print(f"FAIL: command failed: {error}", file=sys.stderr)
+    sys.exit(1)
+print("FAIL: transcription not found within 120 seconds", file=sys.stderr)
+sys.exit(1)
+PYWAIT
