@@ -11,6 +11,9 @@ private final class ModelsPageState: ObservableObject {
     @Published var cloud = false
     @Published var sortColumn = ""
     @Published var ascending = true
+    @Published var installed: Set<String>?
+    @Published var visible: [Model] = []
+    var scanGeneration = 0
 }
 private final class CustomModelState: ObservableObject {
     @Published var address = ""
@@ -29,9 +32,10 @@ struct ModelsPageView: View {
     @StateObject private var ui = ModelsPageState()
 
     private var favoriteIDs: Set<String> { Set(favorites.split(separator: ",").map(String.init)) }
-    private var visible: [Model] {
+    private func rebuildVisible() {
+        let start = ProcessInfo.processInfo.systemUptime
         let preferred = ["whisper-large-v3", "whisper-large-v3-turbo", "whisper-medium", "whisper-small", "whisper-small.en"]
-        return controller.models.filter { (ui.query.isEmpty || $0.name.localizedCaseInsensitiveContains(ui.query) || displayName($0).localizedCaseInsensitiveContains(ui.query)) && (!ui.installedOnly || ModelStore.exists($0)) }.sorted { a, b in
+        ui.visible = controller.models.filter { (ui.query.isEmpty || $0.name.localizedCaseInsensitiveContains(ui.query) || displayName($0).localizedCaseInsensitiveContains(ui.query)) && (!ui.installedOnly || (ui.installed?.contains($0.id) ?? false)) }.sorted { a, b in
             if !ui.sortColumn.isEmpty {
                 let comparison: ComparisonResult
                 switch ui.sortColumn {
@@ -46,6 +50,20 @@ struct ModelsPageView: View {
             let x = preferred.firstIndex(of: a.id) ?? preferred.count
             let y = preferred.firstIndex(of: b.id) ?? preferred.count
             return x == y ? a.name.localizedStandardCompare(b.name) == .orderedAscending : x < y
+        }
+        UITrace.duration("models-filter-sort-\(controller.models.count)", since: start)
+    }
+    private func refreshInstalled() {
+        ui.scanGeneration += 1
+        let generation = ui.scanGeneration
+        let models = controller.models
+        DispatchQueue.global(qos: .userInitiated).async {
+            let installed = Set(models.filter { ModelStore.exists($0) }.map(\.id))
+            DispatchQueue.main.async {
+                guard generation == ui.scanGeneration else { return }
+                ui.installed = installed
+                rebuildVisible()
+            }
         }
     }
     var body: some View {
@@ -85,18 +103,26 @@ struct ModelsPageView: View {
                     .background(alignment: .leading) { Rectangle().fill(Color.black.opacity(colorScheme == .dark ? 0.3 : 0.14)).frame(width: 1).shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.14), radius: 12, x: -5).offset(x: -1) }
             }
         }
-        .task { await ModelStore.refreshAppleStatus(); controller.objectWillChange.send() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await ModelStore.refreshAppleStatus(); controller.objectWillChange.send() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in Task { await ModelStore.refreshAppleStatus(); controller.objectWillChange.send() } }
+        .task { rebuildVisible(); refreshInstalled(); await ModelStore.refreshAppleStatus() }
+        .onChange(of: controller.models) { _ in rebuildVisible(); refreshInstalled() }
+        .onChange(of: controller.busyModel) { _ in refreshInstalled() }
+        .onChange(of: deleting?.id) { _ in if deleting == nil { refreshInstalled() } }
+        .onChange(of: ui.query) { _ in rebuildVisible() }
+        .onChange(of: ui.installedOnly) { _ in rebuildVisible() }
+        .onChange(of: ui.sortColumn) { _ in rebuildVisible() }
+        .onChange(of: ui.ascending) { _ in rebuildVisible() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await ModelStore.refreshAppleStatus(); refreshInstalled() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in Task { await ModelStore.refreshAppleStatus(); refreshInstalled() } }
         .sheet(isPresented: $ui.custom) { CustomModelSheet(controller: controller) }
-        .sheet(isPresented: $ui.cloud) { CloudModelSheet(controller: controller) }
+        .sheet(isPresented: $ui.cloud) { CloudModelSheet(controller: controller, installed: ui.installed ?? []) }
     }
-    private var keyPlusImage: NSImage {
+    private static let keyPlusImage: NSImage = {
         let image = NSImage(contentsOf: Bundle.module.url(forResource: "key-plus", withExtension: "png")!)!
         image.isTemplate = true
         image.size = NSSize(width: 20, height: 20)
         return image
-    }
+    }()
+    private var keyPlusImage: NSImage { Self.keyPlusImage }
     private func toolbarIcon(_ name: String, plus: Bool = false) -> some View {
         ZStack(alignment: .topTrailing) {
             if plus {
@@ -115,7 +141,7 @@ struct ModelsPageView: View {
                     sortHeader("Speed / Accuracy").lineLimit(1).minimumScaleFactor(0.75).frame(width: compact ? 85 : 110, alignment: .leading)
                     sortHeader("Cloud/Offline").frame(width: 90, alignment: .trailing)
                 }.font(.system(size: 11, weight: .medium)).foregroundStyle(colorScheme == .dark ? Color(red: 118/255, green: 120/255, blue: 123/255) : Color(red: 76/255, green: 76/255, blue: 76/255)).padding(.leading, 56).padding(.trailing, compact ? 18 : 28).padding(.top, 20).padding(.bottom, 8)
-                ScrollView { LazyVStack(spacing: 0) { ForEach(visible) { model in
+                ScrollView { LazyVStack(spacing: 0) { ForEach(ui.visible) { model in
                     HStack(spacing: 8) {
                         Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(Color.secondary).frame(width: 24) }.buttonStyle(.plain)
                         provider(model)
@@ -162,11 +188,11 @@ struct ModelsPageView: View {
             else if let languages = model.languages { Text(languages.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             Spacer()
             HStack(spacing: 8) {
-                if ModelStore.exists(model) {
+                if ui.installed?.contains(model.id) == true {
                     Button(selectedModel == model.id ? "Selected" : "Use in all modes") { selectedModel = model.id; controller.reloadSelectedModel() }.buttonStyle(FooterButton()).disabled(selectedModel == model.id)
                     Button { deleting = model } label: { Image(systemName: "trash.fill").frame(width: 28, height: 28).background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain)
                 } else if controller.busyModel == model.id { Text("Downloading \(Int(controller.downloadProgress * 100))%"); Spacer(); progressButton }
-                else { Button("Download · \(size(model))") { controller.download(model) }.buttonStyle(FooterButton()).disabled(controller.busyModel != nil) }
+                else { Button("Download · \(size(model))") { controller.download(model) }.buttonStyle(FooterButton()).disabled(controller.busyModel != nil || ui.installed == nil) }
             }
         }.font(.system(size: 12)).padding(16)
     }
@@ -198,16 +224,23 @@ struct ModelsPageView: View {
     private func ratings(_ model: Model) -> some View { VStack(alignment: .leading, spacing: 4) { rating(speed(model)); rating(accuracy(model)) } }
     private func rating(_ value: Int?, detail: Bool = false) -> some View { HStack(spacing: detail ? 4 : 2) { ForEach(0..<5) { i in Capsule().fill(i < (value ?? 0) ? Color.primary.opacity(0.38) : Color.primary.opacity(0.09)).frame(width: detail ? 18 : 15, height: detail ? 4 : 2) } } }
     private func size(_ model: Model) -> String { guard let value = model.size else { return "—" }; if model.id == "whisper-large-v3" { return "3 GB" }; if ["whisper-tiny", "whisper-tiny.en"].contains(model.id) { return "75 MB" }; if ["whisper-small", "whisper-small.en"].contains(model.id) { return "500 MB" }; if value >= 1_000_000_000 { return String(format: "%.1f GB", Double(value) / 1_000_000_000) }; return ByteCountFormatter.string(fromByteCount: value, countStyle: .file) }
-    private func action(_ model: Model) -> some View { Button { if ModelStore.exists(model) { deleting = model } else { controller.download(model) } } label: { Image(systemName: ModelStore.exists(model) ? "trash.fill" : "arrow.down").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 15, height: 15).background(ModelStore.exists(model) ? Color.clear : Color.primary.opacity(0.07), in: Circle()).frame(width: 21, height: 21).background(ModelStore.exists(model) ? Color.primary.opacity(0.08) : .clear, in: Circle()).overlay(Circle().stroke(ModelStore.exists(model) ? .clear : Color.primary.opacity(0.35), lineWidth: 1)) }.buttonStyle(.plain).disabled(controller.busyModel != nil).help(ModelStore.exists(model) ? "Delete" : "Download") }
+    private func action(_ model: Model) -> some View {
+        let installed = ui.installed?.contains(model.id) == true
+        return Button { if installed { deleting = model } else { controller.download(model) } } label: {
+            Image(systemName: installed ? "trash.fill" : "arrow.down").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 15, height: 15).background(installed ? Color.clear : Color.primary.opacity(0.07), in: Circle()).frame(width: 21, height: 21).background(installed ? Color.primary.opacity(0.08) : .clear, in: Circle()).overlay(Circle().stroke(installed ? .clear : Color.primary.opacity(0.35), lineWidth: 1))
+        }.buttonStyle(.plain).disabled(controller.busyModel != nil || ui.installed == nil).help(installed ? "Delete" : "Download")
+    }
     private func toggleFavorite(_ model: Model) { var ids = favoriteIDs; if !ids.insert(model.id).inserted { ids.remove(model.id) }; favorites = ids.sorted().joined(separator: ",") }
 }
 
 private struct ProviderMark: View {
+    private static let openAI = NSImage(contentsOf: Bundle.module.url(forResource: "openai", withExtension: "png")!)!
+    private static let nvidia = NSImage(contentsOf: Bundle.module.url(forResource: "nvidia", withExtension: "png")!)!
     let name: String
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 5).fill(name == "NVIDIA" ? Color(red: 130/255, green: 181/255, blue: 47/255) : Color(red: 83/255, green: 86/255, blue: 90/255))
-            if name == "OpenAI" || name == "NVIDIA" { Image(nsImage: NSImage(contentsOf: Bundle.module.url(forResource: name == "OpenAI" ? "openai" : "nvidia", withExtension: "png")!)!).resizable().aspectRatio(contentMode: .fit).frame(width: 15, height: 15) }
+            if name == "OpenAI" || name == "NVIDIA" { Image(nsImage: name == "OpenAI" ? Self.openAI : Self.nvidia).resizable().aspectRatio(contentMode: .fit).frame(width: 15, height: 15) }
             else { Image(systemName: name == "NVIDIA" ? "eye" : name == "Apple" ? "apple.logo" : name == "Cloud" ? "cloud.fill" : "waveform").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white) }
         }
     }
@@ -267,6 +300,7 @@ private final class CloudSheetState: ObservableObject {
 }
 private struct CloudModelSheet: View {
     @ObservedObject var controller: AppController
+    let installed: Set<String>
     @Environment(\.dismiss) private var dismiss
     @StateObject private var state = CloudSheetState()
     var body: some View {
@@ -284,7 +318,7 @@ private struct CloudModelSheet: View {
                 SecureField("API key", text: $state.key)
                 HStack { Text("Offline fallback").frame(width: 110, alignment: .leading); Picker("Offline fallback", selection: $state.fallback) {
                     Text("None").tag("")
-                    ForEach(controller.models.filter { $0.engine != "cloud" && ModelStore.exists($0) }) { Text($0.name).tag($0.id) }
+                    ForEach(controller.models.filter { $0.engine != "cloud" && installed.contains($0.id) }) { Text($0.name).tag($0.id) }
                 }.labelsHidden().frame(maxWidth: .infinity) }
             }.textFieldStyle(.roundedBorder).padding(16).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
             if !state.error.isEmpty { Text(state.error).font(.caption).foregroundStyle(.red) }

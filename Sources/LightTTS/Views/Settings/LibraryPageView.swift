@@ -59,13 +59,23 @@ struct LibraryPageView: View {
                             }
                         }
                     }.padding(.leading, 24).padding(.trailing, 33).padding(.top, 20).padding(.bottom, 20)
-                }.id(controller.historySearch)
+                }
             }
     }
     private func rebuildGroups(_ history: [HistoryEntry], query: String) {
-        let entries = query.isEmpty ? history : history.filter { $0.text.localizedCaseInsensitiveContains(query) }
-        let grouped = Dictionary(grouping: entries) { Calendar.current.startOfDay(for: $0.date) }
-        state.groups = grouped.keys.sorted(by: >).map { HistoryGroup(date: $0, entries: grouped[$0]!.sorted { $0.date > $1.date }) }
+        state.generation += 1
+        let generation = state.generation
+        let started = ProcessInfo.processInfo.systemUptime
+        DispatchQueue.global(qos: .userInitiated).async {
+            let entries = query.isEmpty ? history : history.filter { $0.text.localizedCaseInsensitiveContains(query) }
+            let grouped = Dictionary(grouping: entries) { Calendar.current.startOfDay(for: $0.date) }
+            let groups = grouped.keys.sorted(by: >).map { HistoryGroup(date: $0, entries: grouped[$0]!.sorted { $0.date > $1.date }) }
+            DispatchQueue.main.async {
+                guard generation == state.generation else { return }
+                state.groups = groups
+                UITrace.duration("library-group-\(history.count)", since: started)
+            }
+        }
     }
     private func dayLabel(_ date: Date) -> String {
         if Calendar.current.isDateInToday(date) { return "Today" }
@@ -199,4 +209,5 @@ private struct HistoryGroup: Identifiable { let date: Date; let entries: [Histor
 private final class LibraryState: ObservableObject {
     @Published var groups: [HistoryGroup] = []
     @Published var drawer = false
+    var generation = 0
 }

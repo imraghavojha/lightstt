@@ -25,7 +25,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(SettingsTab.allCases, id: \.rawValue) { tab in
-                    Button { controller.selectSettings(tab.rawValue) } label: {
+                    Button { UITrace.begin("page-\(tab.rawValue)"); controller.selectSettings(tab.rawValue) } label: {
                         HStack(spacing: 5) {
                             Group { if tab == .configuration { ConfigurationGlyph() } else { Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)) } }.foregroundStyle(.white).frame(width: 20, height: 20).background((tab == .library ? Color(red: 1, green: 0.42, blue: 0.19) : Color(white: 0.32)).gradient, in: RoundedRectangle(cornerRadius: 5)).overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.5)).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
                             Text(tab.label).font(.system(size: 13, weight: .medium))
@@ -56,7 +56,7 @@ struct SettingsView: View {
                 case "Library": LibraryPageView(controller: controller)
                 default: ConfigurationPageView(controller: controller)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 43/255, green: 48/255, blue: 53/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
+            }.onChange(of: controller.settingsSelection) { UITrace.end("page-\($0)") }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 43/255, green: 48/255, blue: 53/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
         }.frame(width: 750, height: 508)
         .foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(white: 0.30)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
         .background(ConfirmationFrameOverlay(model: dialog.deleting, name: dialog.deleting?.name ?? "", cancel: { dialog.deleting = nil }, delete: { model in

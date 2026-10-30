@@ -8,6 +8,7 @@ import LightTTSCore
     private let status: NSStatusItem
     private let popover = NSPopover()
     private var window: NSWindow?
+    private var compactHost: NSViewController?
     private var previousApp: NSRunningApplication?
     private var openingSettings = false
 
@@ -68,7 +69,7 @@ import LightTTSCore
         if UserDefaults.standard.bool(forKey: "recordOnMenubarClick"), event?.type == .leftMouseUp, event?.modifierFlags.contains(.option) != true {
             if popover.isShown { popover.performClose(nil) }; app.toggleRecording()
         } else if popover.isShown { popover.performClose(nil) }
-        else { showCompact() }
+        else { UITrace.begin("popover"); showCompact() }
     }
     private func showCompact() {
         guard let button = status.button else { return }
@@ -78,8 +79,10 @@ import LightTTSCore
         previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        UITrace.end("popover")
     }
     func openSettingsWindow() {
+        UITrace.begin("settings-window")
         openingSettings = true
         popover.performClose(nil)
         openingSettings = false
@@ -107,22 +110,24 @@ import LightTTSCore
                 }
             }
         }
+        UITrace.end("settings-window")
     }
     func popoverDidClose(_ notification: Notification) {
-        popover.contentViewController = nil
         defer { previousApp = nil }
         guard !openingSettings, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
         previousApp?.activate()
     }
     private func updateContent() {
+        if let compactHost { popover.contentViewController = compactHost; return }
         let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.openSettingsWindow() })
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
             let hosting = NSHostingController(rootView: view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
             hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
-            popover.contentViewController = hosting
+            compactHost = hosting; popover.contentViewController = hosting
         } else {
-            popover.contentViewController = NSHostingController(rootView: view)
+            let hosting = NSHostingController(rootView: view)
+            compactHost = hosting; popover.contentViewController = hosting
         }
     }
-    func windowWillClose(_ notification: Notification) { window = nil }
+    func windowWillClose(_ notification: Notification) {}
 }
