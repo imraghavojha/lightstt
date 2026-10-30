@@ -12,6 +12,9 @@ struct RecordingView: View {
         case "error":
             let textWidth = (controller.message as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width
             return min(360, max(100, ceil(textWidth) + 66))
+        case "done" where controller.copiedToClipboard:
+            let textWidth = ("Copied to clipboard" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width
+            return ceil(textWidth) + 48
         case "loading":
             let textWidth = ("Loading model…" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold)]).width
             return ceil(textWidth) + 28
@@ -37,6 +40,9 @@ struct RecordingView: View {
                 Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
             } else if controller.state == "done" {
                 Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                if controller.copiedToClipboard {
+                    Text("Copied to clipboard").font(.system(size: 11)).foregroundStyle(.white.opacity(0.7)).padding(.leading, 4)
+                }
             } else if controller.state == "error" {
                 Image(systemName: "exclamationmark.circle").font(.system(size: 13)).foregroundStyle(.white)
                     .help(controller.message)
@@ -68,7 +74,7 @@ struct RecordingView: View {
         .animation(.easeOut(duration: 0.08), value: level.value)
         .frame(width: panelWidth, height: 160)
         .background(PanelSizer(width: panelWidth))
-        .accessibilityLabel(controller.state == "error" ? controller.message : controller.state.capitalized)
+        .accessibilityLabel(controller.state == "error" ? controller.message : (controller.state == "done" && controller.copiedToClipboard ? "Done, copied to clipboard" : controller.state.capitalized))
     }
 }
 

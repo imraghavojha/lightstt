@@ -64,30 +64,31 @@ final class InsertionServiceTests: XCTestCase {
         XCTAssertEqual(clipboard.writes.first?.1, false)
     }
 
-    func testWarningsCopyForAccessibilitySecureAndUnavailable() async {
-        let cases: [(FocusDisposition, Bool, String)] = [
+    func testAccessibilityWarningAndQuietCopies() async {
+        let cases: [(FocusDisposition, Bool, String?)] = [
             (
                 .editable, false,
                 "Grant Accessibility to auto-paste. The transcription was copied to the clipboard."
             ),
-            (.secure, true, "Copied: secure field"),
-            (
-                .unavailable, true,
-                "Could not auto-paste: No focused editable field. The transcription was copied to the clipboard."
-            ),
+            (.secure, true, nil),
+            (.unavailable, true, nil),
         ]
         for (disposition, accessible, warning) in cases {
-            let clipboard = FakeClipboard()
-            let target = FakeTarget()
-            let service = makeService(
-                result: FocusResult(target: target, disposition: disposition), clipboard: clipboard,
-                accessible: accessible)
-            let outcome = await service.deliver(
-                "hello", to: service.captureAtStop(), autoPaste: true
-            ) { true }
-            XCTAssertEqual(outcome, InsertionOutcome(delivery: .copied, warning: warning))
-            XCTAssertEqual(clipboard.writes.count, 1)
-            XCTAssertTrue(target.calls.isEmpty)
+            for history in [false, true] {
+                let clipboard = FakeClipboard()
+                let target = FakeTarget()
+                let service = makeService(
+                    result: FocusResult(target: target, disposition: disposition),
+                    clipboard: clipboard,
+                    history: history, accessible: accessible)
+                let outcome = await service.deliver(
+                    "hello", to: service.captureAtStop(), autoPaste: true
+                ) { true }
+                XCTAssertEqual(outcome, InsertionOutcome(delivery: .copied, warning: warning))
+                XCTAssertEqual(clipboard.writes.count, 1)
+                XCTAssertEqual(clipboard.writes.first?.1, history)
+                XCTAssertTrue(target.calls.isEmpty)
+            }
         }
     }
 
@@ -98,9 +99,7 @@ final class InsertionServiceTests: XCTestCase {
         let missingOutcome = await missing.deliver(
             "hello", to: missing.captureAtStop(), autoPaste: true
         ) { true }
-        XCTAssertEqual(
-            missingOutcome.warning,
-            "No focused editable field. The transcription was copied to the clipboard.")
+        XCTAssertEqual(missingOutcome, InsertionOutcome(delivery: .copied))
         let target = FakeTarget()
         target.error = .changed
         let changed = makeService(
@@ -146,7 +145,7 @@ final class InsertionServiceTests: XCTestCase {
             true
         }
         XCTAssertEqual(
-            outcome, InsertionOutcome(delivery: .copied, warning: "Copied: secure field"))
+            outcome, InsertionOutcome(delivery: .copied))
     }
 
     func testStaleBeforeDeliveryAndAfterFocusResolution() async {

@@ -38,16 +38,14 @@ public final class InsertionService: InsertionServicing {
         guard isCurrent() else { return InsertionOutcome(delivery: .skipped) }
         let settings = options()
         var warning: String?
+        var copied = false
         if !accessibilityGranted() {
             warning =
                 "Grant Accessibility to auto-paste. The transcription was copied to the clipboard."
         } else if case .secure = result.disposition {
-            warning = "Copied: secure field"
+            copied = true
         } else if case .unavailable = result.disposition {
-            warning =
-                result.target == nil
-                ? "No focused editable field. The transcription was copied to the clipboard."
-                : "Could not auto-paste: \(FocusError.unavailable.localizedDescription). The transcription was copied to the clipboard."
+            copied = true
         } else if let target = result.target {
             let send = settings.sendOnShift && shiftHeld()
             do {
@@ -61,20 +59,21 @@ public final class InsertionService: InsertionServicing {
                 }.value
                 guard started else { return InsertionOutcome(delivery: .skipped) }
             } catch FocusError.secure {
-                warning = "Copied: secure field"
+                copied = true
             } catch {
                 warning =
                     "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard."
             }
         } else {
-            warning = "No focused editable field. The transcription was copied to the clipboard."
+            copied = true
         }
 
         guard isCurrent() else { return InsertionOutcome(delivery: .skipped) }
         let clipboardSettings = options()
-        if warning != nil || !clipboardSettings.restoreClipboard {
+        if copied || warning != nil || !clipboardSettings.restoreClipboard {
             clipboard.write(text, allowClipboardHistory: clipboardSettings.allowClipboardHistory)
         }
-        return InsertionOutcome(delivery: warning == nil ? .delivered : .copied, warning: warning)
+        return InsertionOutcome(
+            delivery: copied || warning != nil ? .copied : .delivered, warning: warning)
     }
 }
