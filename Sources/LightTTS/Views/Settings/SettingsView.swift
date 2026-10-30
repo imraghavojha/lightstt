@@ -8,8 +8,9 @@ import LightTTSCore
 private final class SettingsDialogState: ObservableObject { @Published var deleting: Model? }
 
 private enum SettingsTab: String, CaseIterable {
-    case sound = "Sound", models = "Models", library = "Library", configuration = "Configuration"
-    var icon: String { switch self { case .sound: "speaker.wave.2.fill"; case .models: "book.fill"; case .library: "clock.arrow.circlepath"; case .configuration: "gearshape" } }
+    case library = "Library", configuration = "Configuration", sound = "Sound", models = "Models"
+    var label: String { switch self { case .library: "Home"; case .models: "Models library"; default: rawValue } }
+    var icon: String { switch self { case .sound: "speaker.wave.2.fill"; case .models: "book.fill"; case .library: "house.fill"; case .configuration: "gearshape" } }
 }
 
 struct SettingsView: View {
@@ -28,14 +29,14 @@ struct SettingsView: View {
                 ForEach(SettingsTab.allCases, id: \.rawValue) { tab in
                     Button { controller.selectSettings(tab.rawValue) } label: {
                         HStack(spacing: 5) {
-                            Group { if tab == .configuration { ConfigurationGlyph() } else { Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)) } }.foregroundStyle(.white).frame(width: 20, height: 20).background(Color(white: 0.32).gradient, in: RoundedRectangle(cornerRadius: 5)).overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.5)).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
-                            Text(tab.rawValue).font(.system(size: 13, weight: .medium))
+                            Group { if tab == .configuration { ConfigurationGlyph() } else { Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)) } }.foregroundStyle(.white).frame(width: 20, height: 20).background((tab == .library ? Color(red: 1, green: 0.42, blue: 0.19) : Color(white: 0.32)).gradient, in: RoundedRectangle(cornerRadius: 5)).overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.5)).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
+                            Text(tab.label).font(.system(size: 13, weight: .medium))
                             Spacer()
                         }.padding(.horizontal, 8).frame(height: 35).background(controller.settingsSelection == tab.rawValue ? (dark ? Color.white.opacity(0.16) : Color.white.opacity(0.65)) : .clear, in: RoundedRectangle(cornerRadius: 10))
                     }.buttonStyle(.plain)
+                    if tab == .library { Color.clear.frame(height: 12) }
                 }
                 Spacer()
-                Button(attached ? "Detach into window" : "Back to menu", action: detach).buttonStyle(.plain).foregroundStyle(.secondary).font(.system(size: 12)).padding(8)
             }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 58/255, green: 62/255, blue: 69/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
             VStack(spacing: 0) {
