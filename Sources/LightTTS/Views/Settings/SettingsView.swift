@@ -200,7 +200,7 @@ private struct ConfigurationPageView: View {
     private var advancedPage: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Button { controller.showAdvanced = false } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).help("Back to Configuration")
+                Button { controller.showAdvanced = false } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(LinearGradient(colors: scheme == .dark ? [Color(white: 0.29), Color(white: 0.22)] : [Color(white: 0.99), Color(white: 0.92)], startPoint: .top, endPoint: .bottom), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.16), lineWidth: 0.5)) }.buttonStyle(.plain).help("Back to Configuration")
                 Text("Advanced settings").font(.system(size: 13, weight: .bold)); Spacer()
             }.padding(.horizontal, 12).frame(height: 48)
             ScrollView { VStack(alignment: .leading, spacing: 0) {
