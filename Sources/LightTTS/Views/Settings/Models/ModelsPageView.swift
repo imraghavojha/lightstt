@@ -136,8 +136,8 @@ struct ModelsPageView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
                 Button { ui.detail = nil } label: { Image(systemName: "chevron.left").font(.system(size: 12)) }.buttonStyle(.plain).frame(width: 20, height: 28).offset(y: -4)
-                Spacer(); provider(model).offset(y: -8)
-                VStack(alignment: .leading, spacing: 1) { Text(displayName(model)).font(.system(size: 13, weight: .bold)); Text(subtitle(model)).font(.system(size: 10)).foregroundStyle(.secondary) }.offset(y: -5)
+                Spacer(); provider(model).offset(y: -9)
+                VStack(alignment: .leading, spacing: 1) { Text(displayName(model)).font(.system(size: 13, weight: .bold)); Text(subtitle(model)).font(.system(size: 10)).foregroundStyle(.secondary) }.offset(y: -4)
                 Spacer(); Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(.secondary) }.buttonStyle(.plain).offset(y: -4)
             }
             Text(engineDescription(model)).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
