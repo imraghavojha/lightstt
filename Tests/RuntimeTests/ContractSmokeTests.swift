@@ -148,8 +148,7 @@ private final class FakeDriver: CaptureDriver {
 }
 
 private final class FakeTarget: TextTarget, @unchecked Sendable {
-    func insert(_ text: String) throws {}
-    func type(_ text: String) throws {}
+    func paste(_ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool) throws {}
     func sendReturn() throws {}
 }
 

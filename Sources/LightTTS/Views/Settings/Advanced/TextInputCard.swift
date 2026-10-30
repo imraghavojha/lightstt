@@ -39,13 +39,7 @@ extension ConfigurationPageView {
                 Toggle("", isOn: $sendOnShift).labelsHidden().toggleStyle(
                     ReferenceSwitchStyle(label: "Hold shift to auto-send after paste"))
             }
-            PageRule()
-            ConfigurationApplicationRow(
-                title: "Simulate keypresses", help: "Type the result instead of pasting it"
-            ) {
-                Toggle("", isOn: $simulateTyping).labelsHidden().toggleStyle(
-                    ReferenceSwitchStyle(label: "Simulate keypresses"))
-            }
+
         }
     }
 }

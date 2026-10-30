@@ -1,8 +1,7 @@
 import Foundation
 
 public protocol TextTarget: AnyObject, Sendable {
-    func insert(_ text: String) throws
-    func type(_ text: String) throws
+    func paste(_ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool) throws
     func sendReturn() throws
 }
 
