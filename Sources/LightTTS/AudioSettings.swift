@@ -112,17 +112,6 @@ private struct SystemOutputVolume: OutputVolumeControlling {
     func setVolume(_ value: Float, channel: UInt32) { AudioSettings.setOutputVolume(device, element: channel, value: value) }
 }
 // MediaRemote provides the system media-key target without Apple Events.
-private final class MediaGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var generation = 0
-    private var active = false
-    private var operation = 0
-    func setOperation(_ token: Int) { lock.lock(); operation = token; lock.unlock() }
-    func start() -> Int { lock.lock(); defer { lock.unlock() }; generation += 1; active = true; return generation }
-    func stop() { lock.lock(); generation += 1; active = false; lock.unlock() }
-    func isCurrent(_ token: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == token }
-    func ifActive(_ action: () -> Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return active && generation == operation && action() }
-}
 private struct SystemMediaController: MediaControlling {
     let gate: MediaGate
     private static let framework = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
@@ -161,15 +150,21 @@ private struct SystemMediaController: MediaControlling {
         guard let handle = Self.framework, let symbol = dlsym(handle, "MRMediaRemoteSendCommand") else { return false }
         return unsafeBitCast(symbol, to: SendCommand.self)(command, nil)
     }
+    private func processIdentity(_ bundle: String) -> [String]? {
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        guard apps.count == 1, let app = apps.first, let launch = app.launchDate else { return nil }
+        return [bundle, String(app.processIdentifier), String(launch.timeIntervalSince1970)]
+    }
     func pausePlaying() throws -> [String] {
-        guard let identity = target(), isPlaying() == true, target() == identity, gate.ifActive({ send(1) }) else { return [] }
-        return [identity]
+        guard let bundle = target(), let identity = processIdentity(bundle), isPlaying() == true,
+              target() == bundle, processIdentity(bundle) == identity, gate.ifActive({ send(1) }) else { return [] }
+        return identity
     }
     func resume(_ players: [String]) {
-        guard let identity = players.first else { return }
+        guard players.count == 3, let identity = players.first else { return }
         // MediaRemote may report the old playing state briefly after a pause.
         Thread.sleep(forTimeInterval: 0.2)
-        guard target() == identity, isPlaying() == false, target() == identity else { return }
-        _ = send(0)
+        guard gate.ifStopped({ true }), target() == identity, processIdentity(identity) == players, isPlaying() == false, target() == identity, processIdentity(identity) == players else { return }
+        _ = gate.ifStopped { send(0) }
     }
 }

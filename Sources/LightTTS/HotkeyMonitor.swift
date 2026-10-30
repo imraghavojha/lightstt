@@ -72,7 +72,9 @@ struct Shortcut {
     private func register(_ shortcut: Shortcut, id: UInt32) {
         guard !shortcut.modifierOnly else { return }
         var ref: EventHotKeyRef?
-        if RegisterEventHotKey(UInt32(shortcut.code), shortcut.carbonFlags, EventHotKeyID(signature: 0x4c545453, id: id), GetApplicationEventTarget(), 0, &ref) == noErr, let ref { refs[id] = ref } else { registrationFailed = true }
+        let status = RegisterEventHotKey(UInt32(shortcut.code), shortcut.carbonFlags, EventHotKeyID(signature: 0x4c545453, id: id), GetApplicationEventTarget(), 0, &ref)
+        traceCancel("register id=\(id) code=\(shortcut.code) modifiers=\(shortcut.carbonFlags) status=\(status)")
+        if status == noErr, let ref { refs[id] = ref } else { registrationFailed = true }
     }
     func setRecording(_ value: Bool) {
         guard recording != value else { return }; cancelState.setRecording(value)
@@ -84,16 +86,11 @@ struct Shortcut {
     }
     private func registerCancel() {
         let shortcut = Shortcut.cancel
-        if shortcut.modifierOnly || shortcut.carbonFlags == 0 {
-            let available = local != nil && global != nil
-            if !available { registrationFailed = true }
-            traceCancel("monitor code=\(shortcut.code) available=\(available)")
-        } else {
-            register(shortcut, id: 3)
-            traceCancel("carbon code=\(shortcut.code) registered=\(refs[3] != nil)")
-        }
+        if shortcut.modifierOnly { traceCancel("modifier cancel uses flags monitor") }
+        else { register(shortcut, id: 3) }
     }
     private func dispatch(_ id: UInt32, _ down: Bool) {
+        traceCancel("dispatch id=\(id) down=\(down) recording=\(recording)")
         guard !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return }
         if id == 1 { if toggleState.key(down) { onShortcut?(true) }; return }
         if down { toggleState.usedInChord(); guard active.insert(id).inserted else { return } } else { guard active.remove(id) != nil else { return } }
@@ -106,9 +103,6 @@ struct Shortcut {
         }
         if event.type == .keyDown {
             toggleState.usedInChord()
-            let cancel = Shortcut.cancel
-            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            if cancelState.shouldRegister && !cancel.modifierOnly && cancel.carbonFlags == 0 && Int(event.keyCode) == cancel.code && flags.isEmpty && !event.isARepeat && !ShortcutButton.isRecording && !MouseShortcutButton.isRecording { onEscape?() }
             return
         }
         let shortcuts: [(UInt32, Shortcut)] = [(1, .toggle)] + (pushAvailable ? [(2, .push)] : []) + (recording ? [(3, .cancel)] : [])
