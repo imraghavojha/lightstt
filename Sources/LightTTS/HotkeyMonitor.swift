@@ -26,6 +26,8 @@ struct Shortcut {
     private var global: Any?
     private var local: Any?
     private var active: Set<UInt32> = []
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var unlockObserver: NSObjectProtocol?
     private var toggleState = ToggleShortcutState()
     private var recording = false
     private(set) var registrationFailed = false
@@ -46,11 +48,21 @@ struct Shortcut {
         if recording { register(Shortcut.cancel, id: 3) }
         if AXIsProcessTrusted() {
             local = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .otherMouseDown, .otherMouseUp]) { [weak self] event in
-                MainActor.assumeIsolated { self?.handle(event) }; return event
+                MainActor.assumeIsolated { self?.handle(event, currentFlags: UInt(CGEventSource.flagsState(.combinedSessionState).rawValue)) }; return event
             }
             global = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .otherMouseDown, .otherMouseUp]) { [weak self] event in
-                Task { @MainActor in self?.handle(event) }
+                let currentFlags = UInt(CGEventSource.flagsState(.combinedSessionState).rawValue)
+                Task { @MainActor in self?.handle(event, currentFlags: currentFlags) }
             }
+        }
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.sessionDidBecomeActiveNotification, NSWorkspace.screensDidWakeNotification, NSWorkspace.didActivateApplicationNotification] {
+            workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.resynchronize() }
+            })
+        }
+        unlockObserver = DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.resynchronize() }
         }
         return !registrationFailed
     }
@@ -71,7 +83,7 @@ struct Shortcut {
         if down { toggleState.usedInChord(); guard active.insert(id).inserted else { return } } else { guard active.remove(id) != nil else { return } }
         switch id { case 2: onPush?(down); case 3: if down && recording { onEscape?() }; case 4: onMouse?(down); default: break }
     }
-    private func handle(_ event: NSEvent) {
+    private func handle(_ event: NSEvent, currentFlags: UInt) {
         if event.type == .otherMouseDown || event.type == .otherMouseUp {
             guard event.buttonNumber == (SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1) else { return }
             dispatch(4, event.type == .otherMouseDown); return
@@ -79,22 +91,29 @@ struct Shortcut {
         if event.type == .keyDown { toggleState.usedInChord(); return }
         let shortcuts: [(UInt32, Shortcut)] = [(1, .toggle)] + (pushAvailable ? [(2, .push)] : []) + (recording ? [(3, .cancel)] : [])
         let masks: [Int: UInt] = [54: 0x10, 55: 0x08, 56: 0x02, 60: 0x04, 58: 0x20, 61: 0x40, 59: 0x01, 62: 0x2000]
-        if Shortcut.toggle.modifierOnly && Int(event.keyCode) != Shortcut.toggle.code { toggleState.usedInChord() }
-        for (id, shortcut) in shortcuts where shortcut.modifierOnly && shortcut.code == Int(event.keyCode) {
-            let down = event.modifierFlags.rawValue & (masks[shortcut.code] ?? 0) != 0
-            if id == 1 {
-                let activate = toggleState.modifier(down)
-                if down && masks.contains(where: { $0.key != shortcut.code && event.modifierFlags.rawValue & $0.value != 0 }) { toggleState.usedInChord() }
-                if activate { onShortcut?(true) }
-            }
-            else { dispatch(id, down) }
+        if Shortcut.toggle.modifierOnly {
+            if toggleState.flagsChanged(code: Int(event.keyCode), shortcutCode: Shortcut.toggle.code, eventFlags: event.modifierFlags.rawValue, currentFlags: currentFlags) { onShortcut?(true) }
         }
+        // Recover a missed modifier push-to-talk release even when this event is unrelated.
+        if pushAvailable && Shortcut.push.modifierOnly && Int(event.keyCode) != Shortcut.push.code && currentFlags & (masks[Shortcut.push.code] ?? 0) == 0 && active.contains(2) { dispatch(2, false) }
+        for (id, shortcut) in shortcuts where id != 1 && shortcut.modifierOnly && shortcut.code == Int(event.keyCode) {
+            let down = event.modifierFlags.rawValue & (masks[shortcut.code] ?? 0) != 0
+            dispatch(id, down)
+        }
+    }
+    private func resynchronize() {
+        toggleState.reset()
+        if active.contains(2) { onPush?(false) }
+        if active.contains(4) { onMouse?(false) }
+        active.removeAll()
     }
     func stop() {
         for ref in refs.values { UnregisterEventHotKey(ref) }; refs.removeAll()
         if let handler { RemoveEventHandler(handler) }; handler = nil
         if let global { NSEvent.removeMonitor(global) }; global = nil
         if let local { NSEvent.removeMonitor(local) }; local = nil
-        toggleState.reset(); if active.contains(2) { onPush?(false) }; if active.contains(4) { onMouse?(false) }; active.removeAll()
+        for observer in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }; workspaceObservers.removeAll()
+        if let unlockObserver { DistributedNotificationCenter.default().removeObserver(unlockObserver) }; unlockObserver = nil
+        resynchronize()
     }
 }

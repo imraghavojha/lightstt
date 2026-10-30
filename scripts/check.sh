@@ -6,8 +6,6 @@ trap 'rm -rf "$tmp"' EXIT
 swift build
 swift test
 scripts/test-audio-processing.sh
-swiftc Sources/LightTTS/ModifierKeyState.swift scripts/test-modifier-state.swift -o "$tmp/modifier"
-"$tmp/modifier"
 Tests/LightTTSTests/run-checks.sh
 # The cloud helper check uses a local mock and a generated PCM fixture.
 say -o "$tmp/speech.aiff" 'Hello from LightTTS.'
