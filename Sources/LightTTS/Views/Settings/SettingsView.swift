@@ -57,6 +57,7 @@ struct SettingsView: View {
             if let model = dialog.deleting {
                 ZStack {
                     Color.black.opacity(colorScheme == .dark ? 0.48 : 0.50).ignoresSafeArea()
+                        .background(TitlebarDimmer(opacity: colorScheme == .dark ? 0.48 : 0.50))
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Delete \(alertName(model))").font(.system(size: 13, weight: .bold))
                         Text(model.engine == "apple" ? "LightTTS will forget this selection; macOS manages the speech assets." : model.engine == "cloud" ? "The model and its API key will be removed." : "Are you sure you want to delete this model?").font(.system(size: 13)).foregroundStyle(.secondary)
@@ -64,10 +65,40 @@ struct SettingsView: View {
                             Button("Cancel") { dialog.deleting = nil }.keyboardShortcut(.cancelAction).buttonStyle(AlertButton(destructive: false))
                             Button("Delete", role: .destructive) { do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }; dialog.deleting = nil }.buttonStyle(AlertButton(destructive: true))
                         }
-                    }.padding(20).frame(width: 260).background(colorScheme == .dark ? Color(red: 35/255, green: 37/255, blue: 40/255) : Color(red: 176/255, green: 179/255, blue: 182/255), in: RoundedRectangle(cornerRadius: 34)).shadow(radius: 18)
+                    }.padding(20).frame(width: 260).background(colorScheme == .dark ? Color(red: 35/255, green: 37/255, blue: 40/255) : Color(red: 176/255, green: 179/255, blue: 182/255), in: RoundedRectangle(cornerRadius: 34)).shadow(radius: 18).offset(y: -14)
                 }
             }
         }.onChange(of: selectedModel) { _ in controller.warmSelected() }
+    }
+}
+
+// The native title bar lies outside the SwiftUI content view. Add a non-interactive
+// sibling in the window frame while the confirmation is visible so it dims too.
+private struct TitlebarDimmer: NSViewRepresentable {
+    let opacity: Double
+    func makeNSView(context: Context) -> Anchor { Anchor() }
+    func updateNSView(_ view: Anchor, context: Context) { view.opacity = opacity; view.install() }
+    static func dismantleNSView(_ view: Anchor, coordinator: ()) { view.removeDimmer() }
+
+    final class Anchor: NSView {
+        var opacity = 0.5
+        private var dimmer: Dimmer?
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); install() }
+        func install() {
+            guard let window, let content = window.contentView, let frame = content.superview else { removeDimmer(); return }
+            let overlay = dimmer ?? Dimmer()
+            overlay.wantsLayer = true
+            overlay.layer?.backgroundColor = NSColor.black.withAlphaComponent(opacity).cgColor
+            overlay.frame = NSRect(x: 0, y: content.frame.maxY, width: frame.bounds.width, height: max(0, frame.bounds.height - content.frame.maxY))
+            overlay.autoresizingMask = [.width, .minYMargin]
+            if overlay.superview !== frame { overlay.removeFromSuperview(); frame.addSubview(overlay, positioned: .above, relativeTo: nil) }
+            dimmer = overlay
+        }
+        func removeDimmer() { dimmer?.removeFromSuperview(); dimmer = nil }
+        deinit { removeDimmer() }
+    }
+    final class Dimmer: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 
