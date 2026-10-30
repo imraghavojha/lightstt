@@ -52,6 +52,7 @@ final class AudioCapture {
         let rms = sqrt(chunk.reduce(Float(0)) { $0 + $1 * $1 } / Float(max(chunk.count, 1)))
         onLevel(min(1, rms * 8))
     }
+    var isActive: Bool { lock.lock(); defer { lock.unlock() }; return active }
     func stop() -> [Float] {
         lock.lock(); active = false; let result = samples; lock.unlock()
         if !usesTestFile { engine.inputNode.removeTap(onBus: 0); engine.stop() }

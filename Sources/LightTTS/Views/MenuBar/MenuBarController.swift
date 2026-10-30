@@ -24,7 +24,6 @@ import LightTTSCore
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
             popover.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
         }
-        updateContent(attached: true)
         if ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showCompact() }
         }
@@ -68,6 +67,7 @@ import LightTTSCore
     }
     private func showCompact() {
         guard let button = status.button else { return }
+        updateContent(attached: true)
         if let appearance = NSApp.appearance { button.appearance = appearance }
         let frontmost = NSWorkspace.shared.frontmostApplication
         previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
@@ -87,6 +87,7 @@ import LightTTSCore
         NSApp.activate(ignoringOtherApps: true)
     }
     func popoverDidClose(_ notification: Notification) {
+        popover.contentViewController = nil
         defer { previousApp = nil }
         guard !openingSettings, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
         previousApp?.activate()

@@ -3,6 +3,7 @@ import SwiftUI
 import AVFoundation
 import ApplicationServices
 import LightTTSCore
+import Darwin
 
 @MainActor final class AppController: NSObject, ObservableObject {
     @Published var state = "idle"
@@ -17,11 +18,12 @@ import LightTTSCore
     var onCatalogReady: (() -> Void)?
     private var downloadTask: Task<Void, Never>?
     private var engine: (any TranscriptionEngine)?
+    private var unloadTimer: Timer?
     private var loadedID = ""
     private var warmingID = ""
     private var warmingToken = UUID()
     private var warming: Task<any TranscriptionEngine, Error>?
-    private var audio: AudioCapture?
+    private(set) var audio: AudioCapture?
     private var panel: NSPanel?
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
@@ -48,7 +50,8 @@ import LightTTSCore
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == "idle", ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] == nil else { return }
-                if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.panel?.orderOut(nil) }
+                if !self.keepModelLoaded && (self.engine != nil || self.warming != nil) { self.unloadEngine() }
+                if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
             }
         }
         #if DEBUG
@@ -72,11 +75,20 @@ import LightTTSCore
         warming?.cancel()
         warmingID = selected; warmingToken = UUID()
         let token = warmingToken
-        let task = Task.detached(priority: .utility) { try await ModelStore.engine(for: model) }
+        let onCrash: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.warmingToken == token else { return }
+                self.fail("Speech engine exited unexpectedly. Try recording again.")
+            }
+        }
+        let task = Task.detached(priority: .utility) { () -> any TranscriptionEngine in
+            try await HelperEngine.load(model, onCrash: onCrash)
+        }
         warming = task
+        if state == "idle" || state == "error" { scheduleEngineUnload() }
         Task { [weak self] in
             do { _ = try await task.value }
-            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = "" }
+            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = ""; if !(error is CancellationError) { self.fail(error.localizedDescription) } }
         }
     }
     @discardableResult func installHotkey() -> Bool {
@@ -91,7 +103,7 @@ import LightTTSCore
         _ = CGRequestListenEventAccess()
         installHotkey()
     }
-    private func handleShortcut(_ down: Bool) {
+    func handleShortcut(_ down: Bool) {
         if down && !pressed {
             pressed = true
             if state == "error" { cancel() }
@@ -108,11 +120,13 @@ import LightTTSCore
     }
     func start() {
         guard state == "idle" else { return }
+        unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         state = "starting"
+        warmSelected()
         sessionAutoPaste = UserDefaults.standard.object(forKey: "autoPaste") as? Bool ?? true
         focus = nil
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
             do {
                 let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
                 try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
@@ -126,6 +140,13 @@ import LightTTSCore
                 guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
                 guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
                 focus = target
+            }
+            if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+                do {
+                    let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
+                    try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
+                } catch { fail(error.localizedDescription) }
+                return
             }
             #if DEBUG
             if let path = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? ProcessInfo.processInfo.environment["LIGHTTTS_TEST_WAV"] {
@@ -144,6 +165,7 @@ import LightTTSCore
     }
     func stop() {
         guard state == "recording" else { return }
+        LaunchTrace.mark("recording-stopped")
         let samples = testAudio ?? audio?.stop() ?? []
         testAudio = nil; audio = nil; state = "processing"; let current = generation
         processing = Task {
@@ -156,18 +178,19 @@ import LightTTSCore
                     let resolved: any TranscriptionEngine
                     do {
                         if warmingID == selected, let warming { resolved = try await warming.value }
-                        else { resolved = try await ModelStore.engine(for: model) }
+                        else { resolved = try await HelperEngine.load(model) }
                     } catch { if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }; throw error }
                     if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }
                     try Task.checkCancellation(); guard current == generation else { return }
                     engine = resolved; loadedID = selected
                 }
-                guard let engine else { return }
+                guard engine != nil else { return }
                 try Task.checkCancellation(); guard current == generation else { return }
-                let text = try await engine.transcribe(samples: samples)
+                let text = try await engine!.transcribe(samples: samples)
                 guard current == generation else { return }
+                if !keepModelLoaded { unloadEngine() }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
-                if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
+                if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
                     print("LIGHTTTS_TEST transcription completed, samples: \(samples.count)")
                     state = "done"
                     try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
@@ -181,14 +204,16 @@ import LightTTSCore
                     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
+                LaunchTrace.mark("text-inserted")
                 history.insert(HistoryEntry(text: text, date: Date()), at: 0); if history.count > 500 { history.removeLast(history.count - 500) }; saveHistory(); state = "done"
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
     }
-    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; hide() }
+    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; unloadEngine(); hide() }
     private func hide() {
         state = "idle"; level = 0
+        scheduleEngineUnload()
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         else if let panel {
             let current = generation
@@ -196,12 +221,49 @@ import LightTTSCore
                 Task { @MainActor in
                     guard let self, self.generation == current, self.state == "idle", !UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") else { return }
                     panel?.orderOut(nil)
+                    if self.panel === panel { self.panel = nil }
                 }
             }
         }
     }
     func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; level = 0; showPanel() }
-    private func fail(_ text: String) { message = text; state = "error"; showPanel() }
+    private func dismissPanel() {
+        panel?.orderOut(nil)
+        panel = nil
+    }
+    private var keepModelLoaded: Bool {
+        UserDefaults.standard.object(forKey: "keepModelLoaded") as? Bool ?? true
+    }
+    private func unloadEngine() {
+        unloadTimer?.invalidate(); unloadTimer = nil
+        warmingToken = UUID(); warming?.cancel(); warming = nil; warmingID = ""
+        (engine as? HelperEngine)?.terminate()
+        engine = nil; loadedID = ""
+    }
+    // One coalescible, non-repeating timer only while a model is resident or loading.
+    // Set modelIdleTimeoutSeconds in defaults to change the two-minute default.
+    private func scheduleEngineUnload() {
+        unloadTimer?.invalidate(); unloadTimer = nil
+        guard engine != nil || warming != nil else { return }
+        guard keepModelLoaded else { unloadEngine(); return }
+        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") as? Double ?? 120
+        let interval = max(1, configured)
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state == "idle" || self.state == "error" else { return }
+                self.unloadEngine()
+            }
+        }
+        timer.tolerance = 0
+        RunLoop.main.add(timer, forMode: .common)
+        unloadTimer = timer
+    }
+    func fail(_ text: String) {
+        generation += 1; processing?.cancel(); processing = nil
+        _ = audio?.stop(); audio = nil; testAudio = nil; focus = nil; level = 0
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
+        unloadEngine(); message = text; state = "error"; showPanel()
+    }
     private func showPanel() {
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
@@ -235,13 +297,13 @@ import LightTTSCore
         do {
             if ModelStore.exists(model) { try ModelStore.delete(model) }
             if model.id.hasPrefix("custom-") { models.removeAll { $0.id == model.id }; let custom = models.filter { $0.id.hasPrefix("custom-") }; UserDefaults.standard.set(try JSONEncoder().encode(custom), forKey: "customModels") }
-            if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); engine = nil; loadedID = "" }
+            if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); unloadEngine() }
             if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
             objectWillChange.send()
         } catch { message = error.localizedDescription }
     }
     func cancelDownload() { downloadTask?.cancel() }
-    func prepareToQuit() async { let task = downloadTask; task?.cancel(); await task?.value }
+    func prepareToQuit() async { unloadEngine(); let task = downloadTask; task?.cancel(); await task?.value }
     func download(_ model: Model) {
         guard busyModel == nil else { return }
         busyModel = model.id; downloadProgress = 0
