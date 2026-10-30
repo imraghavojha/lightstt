@@ -90,7 +90,7 @@ struct ModelsPageView: View {
                 } else { Button { ui.searching = true } label: { Image(systemName: "magnifyingglass") }.buttonStyle(CircleButton()).help("Search") }
                 Menu { Toggle("Downloaded only", isOn: $ui.installedOnly) } label: { toolbarIcon("line.3.horizontal.decrease") }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.07), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)).help("Filters")
                 Menu { Button("Add cloud model…") { ui.cloud = true }; Button("Add local model…") { ui.custom = true } } label: { Color.clear.frame(width: 20, height: 20) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).overlay { Image(nsImage: keyPlusImage).renderingMode(.template).foregroundColor(colorScheme == .dark ? Color(red: 208/255, green: 209/255, blue: 210/255) : Color(red: 109/255, green: 109/255, blue: 109/255)).allowsHitTesting(false) }.background(Color.primary.opacity(0.07), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)).help("Bring your own key")
-            }.padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
+            }.padding(.leading, 16).padding(.trailing, 10).padding(.top, 10).padding(.bottom, 12)
             library
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red).padding(.horizontal, 20).padding(.bottom, 8) }
         }
@@ -138,23 +138,23 @@ struct ModelsPageView: View {
                 HStack(spacing: 8) {
                     sortHeader("Model name").frame(maxWidth: .infinity, alignment: .leading)
                     sortHeader("Type").frame(width: compact ? 30 : 42, alignment: .leading)
-                    sortHeader("Speed / Accuracy").lineLimit(1).minimumScaleFactor(0.75).frame(width: compact ? 85 : 110, alignment: .leading)
-                    sortHeader("Cloud/Offline").frame(width: 90, alignment: .trailing)
-                }.font(.system(size: 11, weight: .medium)).foregroundStyle(colorScheme == .dark ? Color(red: 118/255, green: 120/255, blue: 123/255) : Color(red: 76/255, green: 76/255, blue: 76/255)).padding(.leading, 56).padding(.trailing, compact ? 18 : 28).padding(.top, 20).padding(.bottom, 8)
+                    sortHeader("Speed / Accuracy").lineLimit(1).minimumScaleFactor(0.75).frame(width: compact ? 85 : 112, alignment: .leading)
+                    sortHeader("Cloud/Offline").frame(width: 100, alignment: .trailing)
+                }.font(.system(size: 11, weight: .medium)).foregroundStyle(colorScheme == .dark ? Color(red: 118/255, green: 120/255, blue: 123/255) : Color(red: 76/255, green: 76/255, blue: 76/255)).padding(.leading, 56).padding(.trailing, compact ? 18 : 37).padding(.top, 20).padding(.bottom, 8)
                 ScrollView { LazyVStack(spacing: 0) { ForEach(ui.visible) { model in
                     HStack(spacing: 8) {
                         Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(Color.secondary).frame(width: 24) }.buttonStyle(.plain)
                         provider(model)
                         Button { ui.detail = model } label: { HStack(spacing: 4) { Text(displayName(model)).lineLimit(1); if model.id.contains(".en") { Text("EN").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary).frame(width: 19, height: 14).background(Color.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 4)) } } }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "waveform").foregroundStyle(.secondary).frame(width: 24, height: 21).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5)).frame(width: compact ? 30 : 42, alignment: .leading)
-                        ratings(model).frame(width: compact ? 85 : 110, alignment: .leading)
+                        Image(systemName: "waveform").foregroundStyle(.secondary).frame(width: 24, height: 21).background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 5)).frame(width: compact ? 30 : 42, alignment: .leading)
+                        ratings(model).frame(width: compact ? 85 : 112, alignment: .leading)
                         HStack(spacing: 6) {
                             if controller.busyModel == model.id && controller.modelOperation != nil { ProgressView().controlSize(.small) }
                             else if controller.busyModel == model.id { ModelProgressView(progress: controller.modelProgress, cancel: controller.cancelDownload, detail: false) }
                             else if model.engine == "cloud" { Image(systemName: "cloud").foregroundStyle(.secondary); action(model) }
                             else { Text(size(model)).font(.system(size: 12, weight: .medium)); action(model) }
-                        }.frame(width: 90, alignment: .trailing)
-                    }.font(.system(size: 13)).frame(height: 36).padding(.leading, 24).padding(.trailing, compact ? 18 : 28)
+                        }.frame(width: 100, alignment: .trailing)
+                    }.font(.system(size: 13)).frame(height: 36).padding(.leading, 24).padding(.trailing, compact ? 18 : 37)
                         .background { if ui.detail?.id == model.id { RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.10)).padding(.horizontal, 24) } }
                 } }.frame(width: width) }
             }
@@ -234,9 +234,10 @@ private struct ProviderMark: View {
     private static let openAI = NSImage(contentsOf: Bundle.module.url(forResource: "openai", withExtension: "png")!)!
     private static let nvidia = NSImage(contentsOf: Bundle.module.url(forResource: "nvidia", withExtension: "png")!)!
     let name: String
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 5).fill(name == "NVIDIA" ? Color(red: 130/255, green: 181/255, blue: 47/255) : Color(red: 83/255, green: 86/255, blue: 90/255))
+            RoundedRectangle(cornerRadius: 5).fill(name == "NVIDIA" ? Color(red: 130/255, green: 181/255, blue: 47/255) : (scheme == .dark ? Color(red: 38/255, green: 40/255, blue: 43/255) : Color(red: 83/255, green: 86/255, blue: 90/255)))
             if name == "OpenAI" || name == "NVIDIA" { Image(nsImage: name == "OpenAI" ? Self.openAI : Self.nvidia).resizable().aspectRatio(contentMode: .fit).frame(width: 15, height: 15) }
             else { Image(systemName: name == "NVIDIA" ? "eye" : name == "Apple" ? "apple.logo" : name == "Cloud" ? "cloud.fill" : "waveform").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white) }
         }

@@ -14,11 +14,11 @@ struct PermissionsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Permissions").font(.system(size: 13, weight: .medium)).padding(.bottom, 9)
-            VStack(spacing: 0) {
+            SettingsCard {
                 row("Microphone", granted: status.microphone, pane: "Privacy_Microphone")
                 Divider()
                 row("Accessibility", granted: status.accessibility, pane: "Privacy_Accessibility")
-            }.padding(.horizontal, 14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            }
         }.padding(.bottom, 18)
             .onAppear { refresh() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }

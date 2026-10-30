@@ -46,7 +46,6 @@ struct LibraryPageView: View {
     }
     private var header: some View {
         HStack(spacing: 10) {
-            Button { controller.leaveLibrary() } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.plain)
             Text("Library").font(.system(size: 13, weight: .bold)); Spacer()
             if controller.historySearchVisible {
                 HStack(spacing: 5) {
@@ -57,7 +56,7 @@ struct LibraryPageView: View {
             } else {
                 Button { controller.historySearchVisible = true } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.plain).help("Search recordings")
             }
-        }.padding(.leading, 12).padding(.trailing, 10).frame(height: 48)
+        }.padding(.leading, 16).padding(.trailing, 10).frame(height: 48)
     }
     private var headerChrome: LinearGradient {
         LinearGradient(colors: scheme == .dark ? [Color(red: 58/255, green: 60/255, blue: 66/255), Color(red: 58/255, green: 61/255, blue: 67/255)] : [Color.white, Color(white: 0.94)], startPoint: .top, endPoint: .bottom)

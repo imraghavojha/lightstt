@@ -436,7 +436,7 @@ import IOKit.ps
         }
     }
 
-    func cancel() { audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; unloadEngine(); hide(); runPendingHistoryReprocess() }
+    func cancel() { message = ""; audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; unloadEngine(); hide(); runPendingHistoryReprocess() }
 
     private func hideImmediately() {
         recordingLevel.value = 0; panel?.orderOut(nil)

@@ -62,7 +62,7 @@ struct SettingsView: View {
                     HStack {
                         Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer()
                         Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(devices.devices, id: \.id) { device in Button(device.name) { SettingsDefaults.store.set(device.id, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)).foregroundStyle(.secondary) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(LinearGradient(colors: dark ? [Color(white: 0.29), Color(white: 0.22)] : [Color(white: 0.99), Color(white: 0.92)], startPoint: .top, endPoint: .bottom), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.16), lineWidth: 0.5)).offset(x: 6).help("Select microphone")
-                    }.padding(.horizontal, 16).frame(height: 48)
+                    }.padding(.horizontal, 16).frame(height: 48).background(Color(nsColor: dark ? NSColor(srgbRed: 43/255, green: 48/255, blue: 53/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1))).zIndex(1)
                 }
                 if let operation = controller.modelOperation { HStack { ProgressView().controlSize(.small); Text(operation).font(.caption); Spacer() }.padding(.horizontal, 16).padding(.vertical, 4) }
                 switch controller.settingsSelection {
@@ -100,7 +100,7 @@ private struct ConfigurationGlyph: View {
 
 
 
-private struct SettingsCard<Content: View>: View {
+struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
     @ViewBuilder var content: Content
     var body: some View { VStack(spacing: 0) { content }.padding(.horizontal, 16).background(scheme == .dark ? Color(red: 58/255, green: 63/255, blue: 68/255) : Color(white: 253/255), in: RoundedRectangle(cornerRadius: 18)).overlay(RoundedRectangle(cornerRadius: 18).stroke(LinearGradient(colors: scheme == .dark ? [Color(red: 77/255, green: 78/255, blue: 83/255), Color(red: 55/255, green: 57/255, blue: 62/255)] : [Color.white, Color.black.opacity(0.09)], startPoint: .top, endPoint: .bottom), lineWidth: 0.5)) }
@@ -215,7 +215,7 @@ private struct ConfigurationPageView: View {
             SettingsCard {
                 shortcutRow("Push to Talk", subtitle: "Separate shortcut: hold to record, release when done", key: "pushHotkeyCode", modifiers: "pushHotkeyModifiers", fallback: 49, enabled: "pushShortcutEnabled"); PageRule()
                 shortcutRow("Toggle Recording", subtitle: "Press once to start, again to stop", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); PageRule()
-                HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255)) }; Spacer(); Button { SettingsDefaults.store.set(-1, forKey: "mouseShortcut"); NotificationCenter.default.post(name: .shortcutsChanged, object: nil); controller.objectWillChange.send() } label: { Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); MouseShortcutRecorder().frame(width: 150, height: 28) }.frame(minHeight: 50); PageRule()
+                HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 10)).foregroundStyle(shortcutSubtitleColor) }; Spacer(); Button { SettingsDefaults.store.set(-1, forKey: "mouseShortcut"); NotificationCenter.default.post(name: .shortcutsChanged, object: nil); controller.objectWillChange.send() } label: { Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); MouseShortcutRecorder().fixedSize().frame(height: 28) }.frame(minHeight: 50); PageRule()
                 shortcutRow("Cancel Recording", subtitle: "Discards the active recording", key: "cancelHotkeyCode", modifiers: "cancelHotkeyModifiers", fallback: 53)
             }
             Text("Application").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 9)
@@ -224,8 +224,8 @@ private struct ConfigurationPageView: View {
                 ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { RetentionPopup(selection: retentionBinding) }
             }
             SettingsCard { Button { controller.showAdvanced.toggle() } label: { HStack { Text("Advanced settings"); Spacer(); Image(systemName: controller.showAdvanced ? "chevron.down" : "chevron.right").foregroundStyle(.secondary) }.frame(height: 48).contentShape(Rectangle()) }.buttonStyle(.plain) }.padding(.top, 18)
-            if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
-        }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24) }.font(.system(size: 13))
+            if !controller.message.isEmpty { InlineStatus(message: controller.message, dismiss: { controller.message = "" }).padding(.top, 12) }
+        }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24) }.clipped().font(.system(size: 13))
     }
     private var advancedPage: some View {
         VStack(spacing: 0) {
@@ -236,7 +236,7 @@ private struct ConfigurationPageView: View {
             ScrollView { VStack(alignment: .leading, spacing: 0) {
                 advancedHeading("Application")
                 SettingsCard {
-                    ConfigurationApplicationRow(title: "Start Recording on Menubar Click") { Toggle("", isOn: $recordOnMenubarClick).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Start Recording on Menubar Click")) }; PageRule()
+                    ConfigurationApplicationRow(title: "Start recording on menu bar click") { Toggle("", isOn: $recordOnMenubarClick).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Start recording on menu bar click")) }; PageRule()
                     ConfigurationApplicationRow(title: "Close after transcription") { Toggle("", isOn: $closeAfterTranscription).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Close after transcription")) }
                 }
                 advancedHeading("Voice model")
@@ -257,7 +257,7 @@ private struct ConfigurationPageView: View {
                     if let progress = controller.historyMigration { ProgressView(progress).frame(width: 100); Button("Cancel") { progress.cancel() } }
                 }.frame(minHeight: 46) }
                 if controller.historyMigration != nil { Text("Moving recordings… Recording and deletion are temporarily unavailable.").font(.caption).foregroundStyle(.secondary) }
-                if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
+                if !controller.message.isEmpty { InlineStatus(message: controller.message, dismiss: { controller.message = "" }).padding(.top, 12) }
                 advancedHeading("Text input")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Clipboard content", help: "Choose whether to restore the previous clipboard contents") {
@@ -303,8 +303,9 @@ private struct ConfigurationPageView: View {
             } }.buttonStyle(.plain)
         } }
     }
+    private var shortcutSubtitleColor: Color { scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255) }
     private func shortcutRow(_ title: String, subtitle: String, key: String, modifiers: String?, fallback: Int, enabled: String? = nil) -> some View {
-        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { ShortcutButton.reset(codeKey: key, modifiersKey: modifiers) }; NotificationCenter.default.post(name: .shortcutsChanged, object: nil); controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).frame(width: 150, height: 28) }.padding(.trailing, 6).frame(minHeight: 50)
+        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 10)).foregroundStyle(shortcutSubtitleColor) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { ShortcutButton.reset(codeKey: key, modifiersKey: modifiers) }; NotificationCenter.default.post(name: .shortcutsChanged, object: nil); controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).fixedSize().frame(height: 28) }.padding(.trailing, 6).frame(minHeight: 50)
     }
 }
 
@@ -505,5 +506,18 @@ private struct AlertButton: ButtonStyle {
     @Environment(\.colorScheme) private var colorScheme
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 13, weight: .semibold)).foregroundStyle(destructive ? Color.red : Color.primary).frame(maxWidth: .infinity).frame(height: 28).background(destructive ? (colorScheme == .dark ? Color(red: 37/255, green: 21/255, blue: 22/255) : Color.red.opacity(configuration.isPressed ? 0.3 : 0.14)) : Color.primary.opacity(configuration.isPressed ? 0.2 : 0.12), in: Capsule())
+    }
+}
+
+private struct InlineStatus: View {
+    let message: String
+    let dismiss: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle")
+            Text(message).frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.plain).help("Dismiss")
+        }.font(.caption).foregroundStyle(.red).padding(12)
+            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 }
