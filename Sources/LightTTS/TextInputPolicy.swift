@@ -2,12 +2,14 @@ import Foundation
 
 enum FocusDisposition { case editable, secure, unavailable }
 enum FocusError: LocalizedError {
-    case secure, unavailable, changed
+    case secure, unavailable, changed, modifiersHeld, eventCreationFailed
     var errorDescription: String? {
         switch self {
         case .secure: return "Copied: secure field"
         case .unavailable: return "No focused editable field"
         case .changed: return "The focused field or app changed before text could be inserted"
+        case .modifiersHeld: return "Release the shortcut keys before pasting"
+        case .eventCreationFailed: return "Could not create paste keyboard events"
         }
     }
 }

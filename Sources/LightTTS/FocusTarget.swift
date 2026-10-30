@@ -88,9 +88,22 @@ final class FocusTarget: @unchecked Sendable {
         writeTranscriptToClipboard(text)
         let count = board.changeCount
         do {
+            let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate, .maskSecondaryFn]
+            let deadline = ProcessInfo.processInfo.systemUptime + 2.0
+            while !CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { throw FocusError.modifiersHeld }
+                Thread.sleep(forTimeInterval: min(0.01, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+            }
             try requireCurrentFocus()
             let source = CGEventSource(stateID: .hidSystemState)
-            for down in [true, false] { let event = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down); event?.flags = .maskCommand; event?.post(tap: .cghidEventTap) }
+            guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+                  let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+                throw FocusError.eventCreationFailed
+            }
+            keyDown.flags = .maskCommand
+            keyUp.flags = .maskCommand
+            keyDown.post(tap: .cghidEventTap)
+            keyUp.post(tap: .cghidEventTap)
         } catch {
             // The caller leaves the transcript on the clipboard when delivery fails.
             throw error
