@@ -6,6 +6,7 @@ final class AudioSettings: @unchecked Sendable {
     private let gate = MediaGate()
     private let sessionQueue = DispatchQueue(label: "com.lighttts.audio-session")
     private var volumeSession: OutputVolumeSession?
+    private var warnedAboutAutomation = false
     private let pauseSession: MediaPauseSession
     init(media: (any MediaControlling)? = nil) {
         pauseSession = MediaPauseSession(controller: (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty ? (media ?? SystemMediaController(gate: gate)) : NoopMediaController())
@@ -75,16 +76,26 @@ final class AudioSettings: @unchecked Sendable {
         let mode = defaults.string(forKey: "recordingSound") ?? "Pause"
         if mode == "Pause" {
             do { try pauseSession.begin() }
-            catch { return "Couldn't pause media: \(error.localizedDescription)" }
-        }
-        if ["Mute", "Lower"].contains(mode), !testAudio {
-            volumeQueue.async { [self] in
-                guard let device = Self.defaultDevice(scope: kAudioDevicePropertyScopeOutput) else { return }
-                let session = OutputVolumeSession(controller: SystemOutputVolume(device: device)); self.volumeSession = session
-                session.begin(factor: mode == "Mute" ? 0 : 0.3)
+            catch {
+                if !testAudio { applyOutputVolume(factor: 0) }
+                if !warnedAboutAutomation {
+                    warnedAboutAutomation = true
+                    return "Media muted. Check player availability and Automation permission in Settings."
+                }
+                return nil
             }
         }
+        if ["Mute", "Lower"].contains(mode), !testAudio {
+            applyOutputVolume(factor: mode == "Mute" ? 0 : 0.3)
+        }
         return nil
+    }
+    private func applyOutputVolume(factor: Float) {
+        volumeQueue.async { [self] in
+            guard let device = Self.defaultDevice(scope: kAudioDevicePropertyScopeOutput) else { return }
+            let session = OutputVolumeSession(controller: SystemOutputVolume(device: device)); self.volumeSession = session
+            session.begin(factor: factor)
+        }
     }
     func end() {
         gate.stop()
@@ -115,6 +126,8 @@ private struct SystemOutputVolume: OutputVolumeControlling {
 private final class SystemMediaController: MediaControlling {
     let gate: MediaGate
     private let intent = MediaIntentTracker()
+    private lazy var playerFallback = PlayerMediaController(players: SystemPlayerController(), gate: gate)
+    private var usedFallback = false
     private var observers: [NSObjectProtocol] = []
     private static let framework = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
     private typealias IsPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (Bool) -> Void) -> Void
@@ -177,7 +190,10 @@ private final class SystemMediaController: MediaControlling {
         return [bundle, String(app.processIdentifier), String(launch.timeIntervalSince1970)]
     }
     func pausePlaying() throws -> [String] {
-        let bundle = target(), playing = isPlaying()
+        let bundle = target()
+        if bundle == nil || !SystemPlayerController().runningPlayers().isEmpty { usedFallback = true; return try playerFallback.pausePlaying() }
+        usedFallback = false
+        let playing = isPlaying()
         let identity = bundle.flatMap { processIdentity($0) }
         trace("pause target=\(bundle ?? "nil") identity=\(identity?.joined(separator: "/") ?? "nil") playing=\(String(describing: playing))")
         guard let bundle, let identity, playing == true,
@@ -188,6 +204,7 @@ private final class SystemMediaController: MediaControlling {
         return identity
     }
     func resume(_ players: [String]) {
+        if usedFallback { usedFallback = false; playerFallback.resume(players); return }
         guard players.count == 3, let identity = players.first else { intent.cancel(); return }
         // MediaRemote may report the old playing state briefly after a pause.
         Thread.sleep(forTimeInterval: 0.2)
@@ -196,4 +213,79 @@ private final class SystemMediaController: MediaControlling {
         guard stopped, bundle == identity, process == players, playing == false, target() == identity, processIdentity(identity) == players else { intent.cancel(); trace("resume skipped"); return }
         trace("resume sent=\(intent.finish { gate.ifStopped { send(0) } })")
     }
+}
+
+
+enum AutomationPlayers {
+    static let supported = [("Music", "com.apple.Music"), ("Spotify", "com.spotify.client")]
+    static func requestRunning() {
+        let bundles = supported.map(\.1).filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
+        DispatchQueue.global(qos: .userInitiated).async {
+            for bundle in bundles {
+                let target = NSAppleEventDescriptor(bundleIdentifier: bundle)
+                _ = AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, true)
+            }
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .automationPermissionChanged, object: nil) }
+        }
+    }
+}
+extension Notification.Name { static let automationPermissionChanged = Notification.Name("LightTTSAutomationPermissionChanged") }
+
+private struct SystemPlayerController: PlayerControlling {
+    func runningPlayers() -> [String] {
+        AutomationPlayers.supported.flatMap { _, bundle in
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundle).compactMap { app in
+                app.launchDate.map { "\(bundle)|\(app.processIdentifier)|\($0.timeIntervalSince1970)" }
+            }
+        }
+    }
+    private func bundle(_ player: String) -> String { String(player.split(separator: "|")[0]) }
+    func authorized(_ player: String) -> Bool {
+        let identifier = bundle(player)
+        let result = PermissionResult()
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            let target = NSAppleEventDescriptor(bundleIdentifier: identifier)
+            result.set(AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, false) == noErr)
+            semaphore.signal()
+        }
+        return semaphore.wait(timeout: .now() + 1) == .success && result.allowed
+    }
+    private func code(_ value: String) -> UInt32 {
+        value.utf8.reduce(0) { ($0 << 8) | UInt32($1) }
+    }
+    private func send(_ eventClass: String, _ eventID: String, player: String, property: Bool = false) -> NSAppleEventDescriptor? {
+        guard runningPlayers().contains(player), let pid = Int32(player.split(separator: "|")[1]) else { return nil }
+        let target = NSAppleEventDescriptor(processIdentifier: pid)
+        let event = NSAppleEventDescriptor(eventClass: code(eventClass), eventID: code(eventID), targetDescriptor: target, returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        if property {
+            let specifier = NSAppleEventDescriptor.record()
+            specifier.setDescriptor(NSAppleEventDescriptor(typeCode: code("prop")), forKeyword: code("want"))
+            specifier.setDescriptor(NSAppleEventDescriptor(enumCode: code("prop")), forKeyword: code("form"))
+            specifier.setDescriptor(NSAppleEventDescriptor(typeCode: code("pPlS")), forKeyword: code("seld"))
+            specifier.setDescriptor(NSAppleEventDescriptor.null(), forKeyword: code("from"))
+            guard let object = specifier.coerce(toDescriptorType: code("obj ")) else { return nil }
+            event.setParam(object, forKeyword: code("----"))
+        }
+        return try? event.sendEvent(options: [.waitForReply, NSAppleEventDescriptor.SendOptions(rawValue: UInt(kAEDoNotPromptForUserConsent))], timeout: 1)
+    }
+    func state(_ player: String) -> String? {
+        guard let result = send("core", "getd", player: player, property: true)?.paramDescriptor(forKeyword: code("----")) else { return nil }
+        switch result.enumCodeValue {
+        case code("kPSP"): return "playing"
+        case code("kPSp"): return "paused"
+        case code("kPSS"): return "stopped"
+        default: return nil
+        }
+    }
+    func pause(_ player: String) -> Bool { send(eventClass(player), "Paus", player: player) != nil }
+    func resume(_ player: String) { _ = send(eventClass(player), "Play", player: player) }
+    private func eventClass(_ player: String) -> String { bundle(player) == "com.spotify.client" ? "spfy" : "hook" }
+}
+
+private final class PermissionResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set(_ allowed: Bool) { lock.lock(); value = allowed; lock.unlock() }
+    var allowed: Bool { lock.lock(); defer { lock.unlock() }; return value }
 }

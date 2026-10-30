@@ -11,7 +11,10 @@ extension SoundPageView {
             SettingsRow(title: "Sound while recording", contentOffset: 5) {
                 Menu {
                     ForEach(["Keep Playing", "Pause", "Mute", "Lower"], id: \.self) { value in
-                        Button(value) { recordingSound = value }
+                        Button(value) {
+                            recordingSound = value
+                            if value == "Pause" { AutomationPlayers.requestRunning() }
+                        }
                     }
                 } label: {
                     HStack(spacing: 8) {
@@ -32,8 +35,7 @@ extension SoundPageView {
                                 false)
                     }
                     .help(
-                        "Pause works with apps that appear in Now Playing, such as Music, Spotify, "
-                            + "browsers, and Podcasts. Mute and Lower reduce output volume while recording."
+                        "Pause controls Music and Spotify (macOS asks once per app). Mute and Lower reduce output volume while recording."
                     )
             }
             PageRule()
