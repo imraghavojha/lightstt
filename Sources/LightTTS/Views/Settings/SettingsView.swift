@@ -362,8 +362,8 @@ private struct RetentionPopup: View {
     }
 }
 
-/// Native popup chrome keeps the indicator and enclosing surface together.
-private struct SettingsPopup: NSViewRepresentable {
+/// Uses the system menu picker for the field and its popup.
+private struct SettingsPopup: View {
     @Binding var selection: Int
     let options: [(Int, String)]
     let width: CGFloat
@@ -373,26 +373,10 @@ private struct SettingsPopup: NSViewRepresentable {
     init(selection: Binding<Int>, options: [String], width: CGFloat) {
         self.init(selection: selection, options: Array(options.enumerated()).map { ($0.offset, $0.element) }, width: width)
     }
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSPopUpButton {
-        let button = NSPopUpButton(frame: .zero, pullsDown: false)
-        button.controlSize = .regular
-        button.target = context.coordinator; button.action = #selector(Coordinator.changed(_:))
-        return button
-    }
-    func updateNSView(_ button: NSPopUpButton, context: Context) {
-        context.coordinator.parent = self
-        if button.itemTitles != options.map(\.1) { button.removeAllItems(); button.addItems(withTitles: options.map(\.1)) }
-        if let index = options.firstIndex(where: { $0.0 == selection }) { button.selectItem(at: index) }
-    }
-    final class Coordinator: NSObject {
-        var parent: SettingsPopup
-        init(_ parent: SettingsPopup) { self.parent = parent }
-        @objc func changed(_ sender: NSPopUpButton) {
-            guard parent.options.indices.contains(sender.indexOfSelectedItem) else { return }
-            parent.selection = parent.options[sender.indexOfSelectedItem].0
-            if let index = parent.options.firstIndex(where: { $0.0 == parent.selection }) { sender.selectItem(at: index) }
-        }
+    var body: some View {
+        Picker("", selection: $selection) {
+            ForEach(options, id: \.0) { value, title in Text(title).tag(value) }
+        }.labelsHidden().pickerStyle(.menu).frame(width: width)
     }
 }
 
