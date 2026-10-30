@@ -350,15 +350,25 @@ import IOKit.ps
         let inputID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
         let inputName = inputID.isEmpty ? "System default" : (AVCaptureDevice.devices(for: .audio).first { $0.uniqueID == inputID }?.localizedName ?? "Microphone")
         let processingStart = Date()
+        // AVAudioEngine teardown can block the main thread; retain the stopped capture
+        // until after text insertion instead of releasing it on the stop path.
+        let finishedCapture = audio
+        LaunchTrace.mark("stop-setup-start")
         testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; runPendingHistoryReprocess(); if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
+        LaunchTrace.mark("stop-setup-end")
         let usedPushToTalk = recordingUsesPushToTalk
         recordingUsesPushToTalk = false
         if let error = AudioProcessing.recordingError(samples: rawSamples, duration: elapsed, pushToTalk: usedPushToTalk) { fail(error); return }
 
-        processing = Task {
+        LaunchTrace.mark("processing-task-enqueued")
+        processing = Task { [finishedCapture] in
+            defer { withExtendedLifetime(finishedCapture) {} }
+            LaunchTrace.mark("processing-task-start")
             do {
                 let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+                LaunchTrace.mark("model-check-start")
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
+                LaunchTrace.mark("model-check-end")
                 if loadedID != selected || engine == nil {
                     state = "loading"
                     warmSelected()
