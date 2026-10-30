@@ -23,18 +23,11 @@ if [[ "$CONFIG" == "debug" ]]; then
     /usr/libexec/PlistBuddy -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array' "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string lighttts' "$APP/Contents/Info.plist"
 fi
-IDENTITY="${LIGHTTTS_CODESIGN_IDENTITY:-}"
-if [[ -z "$IDENTITY" ]] && security find-identity -v -p codesigning "$HOME/Library/Keychains/login.keychain-db" | grep -Fq '"LightTTS Local Signing"'; then
-    IDENTITY="LightTTS Local Signing"
-fi
-if [[ -n "$IDENTITY" ]]; then
-    HASH="$(security find-identity -v -p codesigning "$HOME/Library/Keychains/login.keychain-db" | awk -v name="\"$IDENTITY\"" 'index($0,name) {print $2; exit}')"
-    [[ -n "$HASH" ]] || { echo "Signing identity not found: $IDENTITY" >&2; exit 1; }
-    codesign --force --deep --sign "$HASH" --requirements "=designated => identifier \"com.lighttts.app\" and certificate leaf = H\"$HASH\"" "$APP"
-else
-    echo "Warning: no local signing identity; run scripts/setup-signing.sh to avoid repeated permission prompts." >&2
-    codesign --force --deep --sign - "$APP"
-fi
+KEYCHAIN="$HOME/Library/Keychains/lighttts-signing.keychain-db"
+security unlock-keychain -p lighttts-local "$KEYCHAIN"
+HASH="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/"LightTTS Dev Signing"/ {print $2; exit}')"
+[[ -n "$HASH" ]] || { echo "LightTTS signing identity is missing; run scripts/setup-signing.sh." >&2; exit 1; }
+codesign --force --deep --sign "$HASH" --keychain "$KEYCHAIN" --requirements "=designated => identifier \"com.lighttts.app\" and certificate leaf = H\"$HASH\"" "$APP"
 mkdir -p "$INSTALL"
 rsync -a --delete "$APP/" "$INSTALL/"
 codesign --verify --deep --strict "$INSTALL"
