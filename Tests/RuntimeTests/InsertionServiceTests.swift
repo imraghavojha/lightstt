@@ -237,7 +237,7 @@ final class InsertionServiceTests: XCTestCase {
         XCTAssertEqual(
             focusDisposition(role: "AXTextField", subrole: "AXSecureTextField", secureInput: false),
             .secure)
-        XCTAssertFalse(shouldRestoreClipboard(disposition: .uncertain, preference: true))
+        XCTAssertTrue(shouldRestoreClipboard(disposition: .uncertain, preference: true))
         XCTAssertFalse(shouldRestoreClipboard(disposition: .editable, preference: false))
         XCTAssertTrue(shouldRestoreClipboard(disposition: .editable, preference: true))
         let target = FakeTarget()
@@ -249,7 +249,7 @@ final class InsertionServiceTests: XCTestCase {
         }
         XCTAssertEqual(outcome.delivery, .delivered)
         XCTAssertEqual(target.calls, ["paste: hello"])
-        XCTAssertEqual(target.restores, [false])
+        XCTAssertEqual(target.restores, [true])
     }
 
     func testClipboardMarkerTypes() async {

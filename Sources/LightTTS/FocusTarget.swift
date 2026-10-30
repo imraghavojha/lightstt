@@ -35,8 +35,7 @@ final class FocusTarget: @unchecked Sendable {
     }
     static func capture(frontPID: pid_t?) -> (target: FocusTarget?, secure: Bool) {
         let secure = IsSecureEventInputEnabled()
-        let testPID = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TARGET_PID"].flatMap(Int32.init)
-        guard let pid = testPID ?? frontPID else { return (nil, secure) }
+        guard let pid = frontPID else { return (nil, secure) }
         let running = NSRunningApplication(processIdentifier: pid)
         let opaque = isOpaque(running)
         let app = AXUIElementCreateApplication(pid); AXUIElementSetMessagingTimeout(app, 0.5)
@@ -57,7 +56,7 @@ final class FocusTarget: @unchecked Sendable {
         let reason: String
         switch disposition {
         case .secure: reason = "secure input or field"
-        case .unavailable: reason = "own app or noneditable focus"
+        case .unavailable: reason = "own app or Finder desktop"
         case .editable: reason = "editable role"
         case .uncertain: reason = "focus not conclusively classified"
         }
@@ -77,7 +76,7 @@ final class FocusTarget: @unchecked Sendable {
         }
     }
     private func frontmostPID() -> pid_t? {
-        ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TARGET_PID"].flatMap(Int32.init) ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
     }
     func sendReturn() throws {
         try requireSafeFocus()

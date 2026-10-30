@@ -27,23 +27,12 @@ public func focusDisposition(
     if let role, ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(role) {
         return .editable
     }
-    if isFinder && (role == nil || ["AXWindow", "AXScrollArea", "AXGroup"].contains(role!)) {
-        return .unavailable
-    }
-    if !isOpaqueApp, let role,
-        [
-            "AXButton", "AXCheckBox", "AXRadioButton", "AXImage", "AXStaticText", "AXTable",
-            "AXOutline", "AXList", "AXBrowser",
-        ].contains(role)
-    {
-        return .unavailable
-    }
+    if isFinder { return .unavailable }
     return .uncertain
 }
 
 public func shouldRestoreClipboard(disposition: FocusDisposition, preference: Bool) -> Bool {
-    if case .editable = disposition { return preference }
-    return false
+    return preference
 }
 
 public func typeInChunks(
