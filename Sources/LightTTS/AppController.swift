@@ -46,6 +46,7 @@ import Darwin
                 return (catalog + custom, Array(history.prefix(500)))
             }.value
             self.models = data.0; self.history = data.1; LaunchTrace.mark("catalog-ready"); self.onCatalogReady?()
+            await ModelStore.refreshAppleStatus(); self.objectWillChange.send()
         }
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -91,6 +92,10 @@ import Darwin
             do { _ = try await task.value }
             catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = ""; if !(error is CancellationError) { self.fail(error.localizedDescription) } }
         }
+    }
+    func reloadSelectedModel() {
+        warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID()
+        engine = nil; loadedID = ""; warmSelected()
     }
     @discardableResult func installHotkey() -> Bool {
         hotkey.onShortcut = { [weak self] down in self?.handleShortcut(down) }
@@ -352,6 +357,20 @@ import Darwin
                 model.files = files; model.size = files.reduce(0) { $0 + $1.size }; addCustom(model); download(model)
             } catch { message = error.localizedDescription }
         }
+    }
+    func addCloudModel(provider: CloudProvider, name: String, address: String, key: String, fallbackID: String?) throws {
+        let modelName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !modelName.isEmpty, provider == .compatible || provider.models.contains(modelName) else { throw SpeechError.model("Choose a supported model.") }
+        let endpoint: URL?
+        if provider == .compatible {
+            guard let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme?.lowercased() == "https", url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { throw SpeechError.model("Enter a valid HTTPS base URL.") }
+            endpoint = url
+        } else { endpoint = nil }
+        let id = "custom-" + UUID().uuidString
+        try CloudKeychain.save(key, id: id)
+        var model = Model(id: id, name: "\(provider.title) · \(modelName)", engine: "cloud")
+        model.cloudProvider = provider; model.cloudModel = modelName; model.cloudEndpoint = endpoint; model.fallbackID = fallbackID
+        addCustom(model)
     }
     private func addCustom(_ model: Model) {
         models.append(model)

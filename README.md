@@ -21,3 +21,5 @@ Run `scripts/setup-signing.sh` once to create the dedicated local development si
 For debug builds, `LIGHTTTS_TEST_AUDIO` selects a WAV input without starting the microphone, and the debug-only `lighttts://toggle` URL triggers the same shortcut handler. The app requests missing microphone, Accessibility and Input Monitoring permissions during its first onboarding pass; previously granted permissions are not requested again.
 
 Set `LIGHTTTS_TEST_ADHOC=1` to build and verify an ad-hoc signed bundle in the workspace without updating the installed app.
+
+In Models, use “Bring your own key” to add a free-tier Groq, Gemini, or ElevenLabs speech model, or a custom OpenAI-compatible endpoint. Keys are stored in Keychain; audio is sent to the selected cloud provider. See the catalog schema for free-tier sources and CLI testing.

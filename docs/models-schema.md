@@ -11,3 +11,14 @@ The sherpa-onnx package is pinned to 2.0.1 and is Apache-2.0 licensed; model and
 For a model-path smoke test, run `lighttts-cli download MODEL_ID` followed by `lighttts-cli transcribe MODEL_ID sample.wav`. The CLI reads the same catalog and model store as the app. SpeechAnalyzer installation uses the current macOS locale and may require an Apple-managed asset download.
 
 For non-Whisper multi-file models hosted outside Hugging Face, an HTTP(S) URL may point to a JSON manifest: an array of `{ "path": "relative/path", "url": "https://…", "size": 123, "sha256": "…" }` objects. Paths must match the selected engine format; every downloaded file is verified before installation.
+
+## Free cloud models (verified 2026-10-30)
+
+- **Groq Whisper large-v3 and large-v3-turbo:** [free-tier rate limits](https://console.groq.com/docs/rate-limits) list both models; [billing FAQ](https://console.groq.com/docs/billing-faqs) requires a payment method for upgrading from Free, not for remaining on it.
+- **Gemini 2.5 Flash:** [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) lists free input/output and audio support; [billing](https://ai.google.dev/gemini-api/docs/billing) says new accounts start on Free and billing is linked for Paid. Availability and free-tier eligibility vary by account and region.
+- **ElevenLabs Scribe v2:** [pricing](https://elevenlabs.io/pricing) lists 10,000 monthly Free credits and speech-to-text credit consumption, while [ElevenLabs' STT API page](https://join.elevenlabs.io/api/speech-to-text) says no credit card is required to begin. Quotas are shared with other ElevenLabs products.
+- **OpenAI-compatible endpoint:** user-supplied; cost and availability depend on the endpoint. It is not represented as a free hosted service.
+
+Mistral Voxtral is not listed as free because current official documentation did not establish that its speech endpoint has ongoing no-card free API access. Provider terms, quotas, and eligibility can change. Cloud audio is uploaded to the chosen provider; credentials are stored in macOS Keychain, never in the catalog. An optional installed local model can be used when the cloud connection is unavailable. For a credentialed smoke test, run `lighttts-cli cloud groq|gemini|elevenlabs|compatible sample.wav [MODEL] [BASE_URL]` with the corresponding provider's `*_API_KEY` environment variable. The command reports a skip without making a request when the key is absent.
+
+Canary-Qwen 2.5B is not listed: its speech-language-model ONNX architecture is not implemented by the pinned sherpa-onnx Canary or Qwen3 ASR adapters. Adding a file-only entry would not make it runnable; it still needs a compatible runtime and an end-to-end test.

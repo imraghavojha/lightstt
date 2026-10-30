@@ -4,7 +4,16 @@ import LightTTSCore
     static func main() async {
         do {
             let args = CommandLine.arguments
+            await ModelStore.refreshAppleStatus()
             let catalog = try ModelCatalog.load()
+            if args.count >= 4, args[1] == "cloud" {
+                guard let provider = CloudProvider(rawValue: args[2]) else { throw SpeechError.model("Unknown cloud provider") }
+                guard let key = ProcessInfo.processInfo.environment[provider.environmentKey], !key.isEmpty else { print("SKIP: \(provider.environmentKey) is not set"); return }
+                let name = args.count > 4 ? args[4] : provider.models.first ?? ""
+                let endpoint = args.count > 5 ? URL(string: args[5]) : nil
+                let engine = try CloudEngine(provider: provider, model: name, apiKey: key, baseURL: endpoint)
+                print(try await engine.transcribe(samples: AudioFileReader.read(URL(fileURLWithPath: args[3])))); return
+            }
             if args.count == 3, args[1] == "download" {
                 guard let model = catalog.first(where: { $0.id == args[2] }) else { throw SpeechError.model("Unknown model") }
                 try await ModelStore.download(model) { progress in fputs("\r\(Int(progress * 100))%", stderr) }
@@ -20,7 +29,7 @@ import LightTTSCore
                 guard let model = catalog.first(where: { $0.id == id }) else { throw SpeechError.model("Unknown model") }
                 try await ModelStore.download(model); print(ModelStore.path(model).path); return
             }
-            guard args.count == 4 else { throw SpeechError.model("Usage: lighttts-cli download MODEL_ID | transcribe MODEL_ID AUDIO_FILE | whisper MODEL_FILE AUDIO_FILE | parakeet-v2|parakeet-v3 MODEL_DIRECTORY AUDIO_FILE") }
+            guard args.count == 4 else { throw SpeechError.model("Usage: lighttts-cli cloud PROVIDER AUDIO_FILE [MODEL] [BASE_URL] | download MODEL_ID | transcribe MODEL_ID AUDIO_FILE | whisper MODEL_FILE AUDIO_FILE | parakeet-v2|parakeet-v3 MODEL_DIRECTORY AUDIO_FILE") }
             let model = URL(fileURLWithPath: args[2]); let samples = try AudioFileReader.read(URL(fileURLWithPath: args[3]))
             let engine: any TranscriptionEngine
             if args[1] == "whisper" { engine = try WhisperCppEngine(modelURL: model) }
