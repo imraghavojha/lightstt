@@ -3,6 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/lighttts-check.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+scripts/check-format.sh
+
 swift build
 swift test
 scripts/test-audio-processing.sh

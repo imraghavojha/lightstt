@@ -1,0 +1,10 @@
+{
+  "indentation": { "spaces": 4 },
+  "lineLength": 100,
+  "respectsExistingLineBreaks": true,
+  "rules": {
+    "DoNotUseSemicolons": true,
+    "OneVariableDeclarationPerLine": true,
+    "OneCasePerLine": true
+  }
+}
