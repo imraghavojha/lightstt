@@ -5,7 +5,7 @@ let package = Package(name: "LightTTS", platforms: [.macOS(.v14)], products: [.e
     .target(name: "LightTTSCore", resources: [.process("Resources")]),
     .target(name: "LightTTSInference", dependencies: ["LightTTSCore", .product(name: "FluidAudio", package: "FluidAudio"), .product(name: "sherpa-onnx", package: "sherpa-onnx"), "whisper"]),
     .executableTarget(name: "LightTTSEngine", dependencies: ["LightTTSInference", .product(name: "FluidAudio", package: "FluidAudio")]),
-    .executableTarget(name: "LightTTS", dependencies: ["LightTTSCore"]),
+    .executableTarget(name: "LightTTS", dependencies: ["LightTTSCore"], resources: [.process("Resources")]),
     .executableTarget(name: "LightTTSCLI", dependencies: ["LightTTSCore", "LightTTSInference", .product(name: "FluidAudio", package: "FluidAudio")]),
     .executableTarget(name: "model-validation", dependencies: ["LightTTSCore"]),
     .executableTarget(name: "cloud-validation", dependencies: ["LightTTSCore", "LightTTSInference"])
