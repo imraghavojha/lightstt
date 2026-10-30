@@ -83,13 +83,22 @@ private struct TitlebarDimmer: NSViewRepresentable {
     final class Anchor: NSView {
         var opacity = 0.5
         private var dimmer: Dimmer?
-        private var buttonAlphas: [(NSButton, CGFloat)] = []
+        private var buttonDimmers: [Dimmer] = []
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); install() }
         func install() {
             guard let window, let content = window.contentView, let frame = content.superview else { removeDimmer(); return }
-            if buttonAlphas.isEmpty {
-                buttonAlphas = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }.map { ($0, $0.alphaValue) }
-                for (button, alpha) in buttonAlphas { button.alphaValue = alpha * (1 - opacity) }
+            if buttonDimmers.isEmpty {
+                for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                    guard let button = window.standardWindowButton(type) else { continue }
+                    let shade = Dimmer(frame: button.bounds)
+                    shade.wantsLayer = true
+                    shade.layer?.backgroundColor = NSColor.black.withAlphaComponent(opacity).cgColor
+                    shade.layer?.cornerRadius = min(button.bounds.width, button.bounds.height) / 2
+                    shade.layer?.masksToBounds = true
+                    shade.autoresizingMask = [.width, .height]
+                    button.addSubview(shade)
+                    buttonDimmers.append(shade)
+                }
             }
             let overlay = dimmer ?? Dimmer()
             overlay.wantsLayer = true
@@ -99,7 +108,7 @@ private struct TitlebarDimmer: NSViewRepresentable {
             if overlay.superview !== frame { overlay.removeFromSuperview(); frame.addSubview(overlay, positioned: .above, relativeTo: nil) }
             dimmer = overlay
         }
-        func removeDimmer() { dimmer?.removeFromSuperview(); dimmer = nil; for (button, alpha) in buttonAlphas { button.alphaValue = alpha }; buttonAlphas = [] }
+        func removeDimmer() { dimmer?.removeFromSuperview(); dimmer = nil; for shade in buttonDimmers { shade.removeFromSuperview() }; buttonDimmers = [] }
         deinit { removeDimmer() }
     }
     final class Dimmer: NSView {
