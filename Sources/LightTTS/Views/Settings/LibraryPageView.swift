@@ -29,19 +29,23 @@ struct LibraryPageView: View {
     }
     private var header: some View {
         HStack(spacing: 10) {
-            Button { controller.leaveLibrary() } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)) }.buttonStyle(.plain)
+            Button { controller.leaveLibrary() } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.plain)
             Text("Library").font(.system(size: 13, weight: .bold)); Spacer()
             if controller.historySearchVisible {
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass")
                     TextField("Search history", text: $controller.historySearch).textFieldStyle(.plain)
                     Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
-                }.font(.system(size: 13)).padding(.horizontal, 8).frame(width: 220, height: 28).background(Color.primary.opacity(0.09), in: Capsule())
+                }.font(.system(size: 13)).padding(.horizontal, 8).frame(width: 220, height: 28).background(headerChrome, in: Capsule()).overlay(Capsule().stroke(headerEdge, lineWidth: 0.5))
             } else {
-                Button { controller.historySearchVisible = true } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5)) }.buttonStyle(.plain).help("Search recordings")
+                Button { controller.historySearchVisible = true } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.plain).help("Search recordings")
             }
         }.padding(.leading, 12).padding(.trailing, 10).frame(height: 48)
     }
+    private var headerChrome: LinearGradient {
+        LinearGradient(colors: scheme == .dark ? [Color(white: 0.29), Color(white: 0.24)] : [Color.white, Color(white: 0.94)], startPoint: .top, endPoint: .bottom)
+    }
+    private var headerEdge: Color { scheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.15) }
     @ViewBuilder private var content: some View {
             if state.groups.isEmpty {
                 VStack { Text(controller.historySearch.isEmpty ? "No recordings yet" : "No recordings found.").font(.system(size: 13)).padding(.top, 133); Spacer() }.frame(maxWidth: .infinity)
@@ -95,7 +99,7 @@ struct LibraryPageView: View {
                     }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
                     action("doc.on.doc.fill", "Copy") { copy(item) }
-                    Button {} label: { Image(systemName: "sparkle") .overlay(Circle().stroke(lineWidth: 1).frame(width: 12, height: 12)) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
+                    Button {} label: { Image(systemName: "arrow.clockwise").overlay(Image(systemName: "sparkle").font(.system(size: 6)), alignment: .center).frame(width: 24, height: 24) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
                     action("info.circle", "Recording information") { state.drawer = true }
                     action("trash", "Delete") { controller.deleteHistory(item.id); controller.selectedHistory = nil }
                 }.font(.system(size: 12))
@@ -134,7 +138,7 @@ struct LibraryPageView: View {
         }.padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
     private func segmentButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).frame(maxWidth: .infinity).frame(height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(.plain)
+        Button(action: action) { Text(title).font(.system(size: 11, weight: selected ? .semibold : .regular)).frame(width: title == "Original" ? 60 : 78, height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)).shadow(color: selected ? .black.opacity(0.12) : .clear, radius: 1, y: 1) }.buttonStyle(.plain)
     }
     private func action(_ icon: String, _ help: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) { Image(systemName: icon).frame(width: 24, height: 24) }.buttonStyle(.plain).help(help)
@@ -159,21 +163,26 @@ struct LibraryPageView: View {
                     Button("Open file location") { controller.revealHistory(item) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.blue, in: RoundedRectangle(cornerRadius: 7)).foregroundStyle(.white)
                 }.buttonStyle(.plain).font(.system(size: 11))
             }.padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 16)
-        }.frame(maxHeight: .infinity).background(scheme == .dark ? Color(red: 44/255, green: 47/255, blue: 52/255) : Color(white: 0.95)).shadow(color: .black.opacity(0.2), radius: 8, x: -3)
+        }.frame(maxHeight: .infinity).background(drawerBackground).compositingGroup().shadow(color: .black.opacity(0.12), radius: 8, x: -3)
+    }
+    private var drawerBackground: LinearGradient {
+        LinearGradient(colors: scheme == .dark
+            ? [Color(red: 49/255, green: 53/255, blue: 62/255), Color(red: 35/255, green: 41/255, blue: 53/255)]
+            : [Color(red: 227/255, green: 230/255, blue: 236/255), Color(red: 230/255, green: 234/255, blue: 240/255)], startPoint: .top, endPoint: .bottom)
     }
     private func metadataRow(_ icon: String, _ title: String, _ value: String, _ color: Color) -> some View {
         HStack(spacing: 8) {
             if icon == "provider" { providerBadge }
             else { Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.white).frame(width: 20, height: 20).background(color, in: RoundedRectangle(cornerRadius: 5)) }
-            Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.caption).foregroundStyle(.secondary)
+            Text(title).lineLimit(1); Spacer(minLength: 4); Text(value).font(.system(size: 13)).foregroundStyle(.primary)
         }.font(.system(size: 12))
     }
     private var providerBadge: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.15))
-            ForEach(0..<3) { index in
-                RoundedRectangle(cornerRadius: 4).stroke(Color.white, lineWidth: 0.8)
-                    .frame(width: 7, height: 13).rotationEffect(.degrees(Double(index) * 60))
+            ForEach(0..<6) { index in
+                RoundedRectangle(cornerRadius: 3).trim(from: 0.04, to: 0.82).stroke(Color.white, style: StrokeStyle(lineWidth: 0.75, lineCap: .round))
+                    .frame(width: 6, height: 10).offset(y: -2).rotationEffect(.degrees(Double(index) * 60))
             }
         }.frame(width: 20, height: 20)
     }
