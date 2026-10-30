@@ -1,3 +1,4 @@
+import LightTTSRuntime
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
