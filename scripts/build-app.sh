@@ -15,7 +15,7 @@ for bundle in "$BIN"/*.bundle; do [ -e "$bundle" ] && cp -R "$bundle" "$APP/Cont
 for framework in "$BIN"/*.framework; do
     [ -e "$framework" ] || continue
     name="$(basename "$framework")"
-    if otool -L "$BIN/LightTTS" | grep -Fq "@rpath/$name/"; then cp -R "$framework" "$APP/Contents/Frameworks/"; fi
+    if otool -L "$BIN/LightTTS" "$BIN/LightTTSEngine" | grep -Fq "@rpath/$name/"; then cp -R "$framework" "$APP/Contents/Frameworks/"; fi
 done
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

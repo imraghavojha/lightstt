@@ -95,7 +95,7 @@ import Darwin
     }
     func reloadSelectedModel() {
         warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID()
-        engine = nil; loadedID = ""; warmSelected()
+        engine = nil; loadedID = ""
     }
     @discardableResult func installHotkey() -> Bool {
         hotkey.onShortcut = { [weak self] down in self?.handleShortcut(down) }

@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import LightTTSCore
+import LightTTSInference
 @main struct Validation {
     static func main() async throws {
         if CommandLine.arguments.contains("--apple-status") {
@@ -12,7 +13,7 @@ import LightTTSCore
         if CommandLine.arguments.contains("--download-smoke") { try await downloadSmoke(); return }
         if let index = CommandLine.arguments.firstIndex(of: "--sherpa-cancellation"), CommandLine.arguments.indices.contains(index + 1) {
             guard let model = try ModelCatalog.load().first(where: { $0.id == "moonshine-tiny" }), ModelStore.exists(model) else { throw SpeechError.model("Install moonshine-tiny first") }
-            let engine = try await ModelStore.engine(for: model)
+            let engine = try await InferenceFactory.engine(for: model)
             let samples = try AudioFileReader.read(URL(fileURLWithPath: CommandLine.arguments[index + 1]))
             let task = Task { withUnsafeCurrentTask { $0?.cancel() }; return try await engine.transcribe(samples: samples) }
             do { _ = try await task.value; throw SpeechError.model("Canceled Sherpa inference returned a result") } catch is CancellationError { print("Sherpa pre-cancellation passed") }

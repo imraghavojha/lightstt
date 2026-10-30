@@ -1,5 +1,6 @@
 import Foundation
 import LightTTSCore
+import LightTTSInference
 @main struct CLI {
     static func main() async {
         do {

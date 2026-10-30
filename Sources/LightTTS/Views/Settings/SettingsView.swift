@@ -58,7 +58,7 @@ struct SettingsView: View {
             do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }
             dialog.deleting = nil
         }))
-        .onChange(of: selectedModel) { _ in controller.warmSelected() }
+        .onChange(of: selectedModel) { _ in controller.reloadSelectedModel() }
     }
 }
 

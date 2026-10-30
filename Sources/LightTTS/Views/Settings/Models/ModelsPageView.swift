@@ -163,7 +163,7 @@ struct ModelsPageView: View {
             Spacer()
             HStack(spacing: 8) {
                 if ModelStore.exists(model) {
-                    Button(selectedModel == model.id ? "Selected" : "Use in all modes") { selectedModel = model.id; controller.warmSelected() }.buttonStyle(FooterButton()).disabled(selectedModel == model.id)
+                    Button(selectedModel == model.id ? "Selected" : "Use in all modes") { selectedModel = model.id; controller.reloadSelectedModel() }.buttonStyle(FooterButton()).disabled(selectedModel == model.id)
                     Button { deleting = model } label: { Image(systemName: "trash.fill").frame(width: 28, height: 28).background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain)
                 } else if controller.busyModel == model.id { Text("Downloading \(Int(controller.downloadProgress * 100))%"); Spacer(); progressButton }
                 else { Button("Download · \(size(model))") { controller.download(model) }.buttonStyle(FooterButton()).disabled(controller.busyModel != nil) }
