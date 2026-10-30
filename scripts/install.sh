@@ -25,12 +25,21 @@ import AppKit
 import Foundation
 let path = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.path
 let apps = NSWorkspace.shared.runningApplications.filter { $0.bundleURL?.standardizedFileURL.path == path }
-for app in apps { guard app.terminate() else { fatalError("Cannot terminate \(path)") } }
-for _ in 0..<100 {
-    if apps.allSatisfy({ $0.isTerminated }) { exit(0) }
-    Thread.sleep(forTimeInterval: 0.1)
+for app in apps { _ = app.terminate() }
+func waitForExit(_ seconds: Int) -> Bool {
+    for _ in 0..<(seconds * 10) {
+        if apps.allSatisfy({ $0.isTerminated }) { return true }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    return apps.allSatisfy({ $0.isTerminated })
 }
-fatalError("Timed out waiting for \(path) to quit")
+if !waitForExit(10) {
+    for app in apps where !app.isTerminated { kill(app.processIdentifier, SIGTERM) }
+    if !waitForExit(3) {
+        for app in apps where !app.isTerminated { kill(app.processIdentifier, SIGKILL) }
+        guard waitForExit(3) else { fatalError("Cannot stop \(path)") }
+    }
+}
 SWIFT
 # renamex_np exchanges existing directories atomically on the same filesystem.
 python3 - "$stage/LightTTS.app" "$dest" <<'PY'
