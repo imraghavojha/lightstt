@@ -32,11 +32,13 @@ import LightTTSCore
     private func makeStatusImage() -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             let path = NSBezierPath()
-            path.move(to: NSPoint(x: 9, y: 15))
-            path.line(to: NSPoint(x: 16, y: 3))
-            path.line(to: NSPoint(x: 2, y: 3))
+            path.move(to: NSPoint(x: 9, y: 14.25))
+            path.line(to: NSPoint(x: 15, y: 3.25))
+            path.line(to: NSPoint(x: 3, y: 3.25))
             path.close()
-            path.lineWidth = 1.8
+            path.lineWidth = 2.5
+            path.lineJoinStyle = .round
+            path.lineCapStyle = .round
             NSColor.black.setStroke()
             path.stroke()
             return true
@@ -59,29 +61,27 @@ import LightTTSCore
         let deviceName = devices.first(where: { $0.id == selectedInput })?.name ?? "\(defaultName) (Default)"
         let input = add(deviceName, action: nil)
         let inputs = NSMenu()
-        let defaultInput = NSMenuItem(title: "System Default (\(defaultName))", action: #selector(selectInput(_:)), keyEquivalent: "")
+        let defaultInput = NSMenuItem(title: "\(defaultName) (Default)", action: #selector(selectInput(_:)), keyEquivalent: "")
         defaultInput.target = self; defaultInput.representedObject = ""; defaultInput.state = selectedInput.isEmpty ? .on : .off
         inputs.addItem(defaultInput)
-        inputs.addItem(.separator())
         for device in devices {
             let item = NSMenuItem(title: device.name, action: #selector(selectInput(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = device.id; item.state = selectedInput == device.id ? .on : .off
             inputs.addItem(item)
         }
         input.submenu = inputs
-        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
-        let modelItem = add("Voice to text", action: nil)
-        let models = NSMenu()
-        for model in app.models where ModelStore.exists(model) {
-            let item = NSMenuItem(title: model.name, action: #selector(selectModel(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = model.id; item.state = model.id == selected ? .on : .off
-            models.addItem(item)
+        let modeItem = add("Voice to text", action: nil)
+        let modes = NSMenu()
+        let voice = NSMenuItem(title: "Voice to text", action: #selector(selectVoiceMode), keyEquivalent: "")
+        voice.target = self; voice.state = .on; modes.addItem(voice)
+        for name in ["Pro", "Default"] {
+            let item = NSMenuItem(title: name, action: #selector(unavailableMode(_:)), keyEquivalent: "")
+            item.target = self; modes.addItem(item)
         }
-        if models.items.isEmpty { let item = NSMenuItem(title: "Download a model in Settings…", action: #selector(modelsSettings), keyEquivalent: ""); item.target = self; models.addItem(item) }
-        modelItem.submenu = models
+        modeItem.submenu = modes
         menu.addItem(.separator())
         let version = add("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1")", action: nil); version.isEnabled = false
-        let updates = add("Check for Updates…", action: nil); updates.isEnabled = false
+        add("Check for Updates…", action: #selector(checkForUpdates))
         let quit = add("Quit", action: #selector(quit), key: "q"); quit.keyEquivalentModifierMask = .command
     }
     @discardableResult private func add(_ title: String, action: Selector?, key: String = "") -> NSMenuItem {
@@ -89,7 +89,11 @@ import LightTTSCore
     }
     @objc private func toggleRecording() { if app.state == "recording" { app.stop() } else if app.state == "idle" { app.start() } }
     @objc private func selectInput(_ sender: NSMenuItem) { guard let id = sender.representedObject as? String else { return }; UserDefaults.standard.set(id, forKey: "inputDeviceUID") }
-    @objc private func selectModel(_ sender: NSMenuItem) { guard let id = sender.representedObject as? String else { return }; UserDefaults.standard.set(id, forKey: "selectedModel"); app.warmSelected() }
+    @objc private func selectVoiceMode() { }
+    @objc private func unavailableMode(_ sender: NSMenuItem) {
+        let alert = NSAlert(); alert.messageText = "\(sender.title) is unavailable"; alert.informativeText = "LightTTS currently supports Voice to text."; alert.runModal()
+    }
+    @objc private func checkForUpdates() { if let url = URL(string: "https://github.com/imraghavojha/lighttts/releases") { NSWorkspace.shared.open(url) } }
     @objc private func history() { showSettings("Library") }
     @objc private func settings() { showSettings(nil) }
     @objc private func modelsSettings() { showSettings("Models") }

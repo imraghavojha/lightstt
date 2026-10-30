@@ -7,10 +7,12 @@ struct RecordingView: View {
         let idle = controller.state == "idle"
         HStack(spacing: 2) {
             if controller.state == "recording" {
-                ForEach(0..<6) { index in
-                    Capsule().fill(.white)
-                        .frame(width: 2, height: max(2, 2 + CGFloat(controller.level) * [6, 10, 14, 14, 10, 6][index]))
-                }
+                HStack(spacing: 2) {
+                    ForEach(0..<6) { index in
+                        Capsule().fill(.white)
+                            .frame(width: 2, height: max(2, 2 + CGFloat(controller.level) * [6, 10, 14, 14, 10, 6][index]))
+                    }
+                }.offset(x: -1)
             } else if controller.state == "processing" {
                 ProgressView().controlSize(.mini).environment(\.colorScheme, .dark)
             } else if controller.state == "done" {
@@ -20,10 +22,11 @@ struct RecordingView: View {
                     .help(controller.message)
             }
         }
-        .frame(width: idle ? 48 : 60, height: idle ? 10 : 32)
-        .background(Color(red: 0.043, green: 0.043, blue: 0.047), in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.24), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        .frame(width: idle ? 45 : 60, height: idle ? 8 : 32)
+        .background(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255), in: Capsule())
+        .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 0.5))
+        .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)
+        .offset(y: idle ? 0 : -9.5)
         .animation(.easeOut(duration: 0.15), value: idle)
         .animation(.easeOut(duration: 0.08), value: controller.level)
         .frame(width: 240, height: 160)
