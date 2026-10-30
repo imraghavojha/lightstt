@@ -21,7 +21,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(SettingsTab.allCases, id: \.rawValue) { tab in
-                    Button { controller.settingsSelection = tab.rawValue } label: {
+                    Button { controller.selectSettings(tab.rawValue) } label: {
                         HStack(spacing: 8) {
                             Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white).frame(width: 20, height: 20).background(Color(white: 0.32).gradient, in: RoundedRectangle(cornerRadius: 5))
                             Text(tab.rawValue).font(.system(size: 14, weight: .medium))
@@ -36,7 +36,7 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 HStack {
                     if controller.settingsSelection == "Library" {
-                        Button { if controller.selectedHistory != nil { controller.stopHistoryPlayback(); controller.selectedHistory = nil } else { controller.settingsSelection = "Sound" } } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain)
+                        Button { if controller.selectedHistory != nil { controller.stopHistoryPlayback(); controller.selectedHistory = nil } else { controller.leaveLibrary() } } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain)
                     }
                     if let item = controller.selectedHistory, controller.settingsSelection == "Library" { Spacer(); Text(item.date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: "en_US")))).font(.system(size: 14, weight: .bold)); Spacer() }
                     else { Text(controller.settingsSelection).font(.system(size: 14, weight: .bold)); Spacer() }
@@ -46,7 +46,7 @@ struct SettingsView: View {
                             HStack(spacing: 6) { Image(systemName: "magnifyingglass"); TextField("Search history", text: $controller.historySearch).textFieldStyle(.plain); Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }.padding(.horizontal, 9).frame(width: 220, height: 28).background(Color.primary.opacity(0.09), in: Capsule())
                         } else { Button { controller.historySearchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).help("Search recordings") }
                     } else {
-                        Menu { Button("System Default") { UserDefaults.standard.set("", forKey: "inputDevice") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { UserDefaults.standard.set(device.uniqueID, forKey: "inputDevice") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).help("Select microphone")
+                        Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDevice") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDevice") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).help("Select microphone")
                     }
                 }.padding(.horizontal, 16).frame(height: 48)
                 switch controller.settingsSelection {
@@ -56,7 +56,7 @@ struct SettingsView: View {
                 default: ConfigurationPageView(controller: controller)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 44/255, green: 47/255, blue: 52/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
-        }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(nsColor: .labelColor)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil)
+        }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(nsColor: .labelColor)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
     }
 }
 
@@ -67,11 +67,22 @@ private struct SettingsCard<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View { VStack(spacing: 0) { content }.padding(.horizontal, 16).background(scheme == .dark ? Color(red: 60/255, green: 63/255, blue: 67/255) : Color(white: 253/255), in: RoundedRectangle(cornerRadius: 18)).overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.08))) }
 }
+private struct ReferenceSwitchStyle: ToggleStyle {
+    let label: String
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            Capsule().fill(configuration.isOn ? Color(red: 228/255, green: 92/255, blue: 156/255) : Color.primary.opacity(0.16))
+                .overlay(Circle().fill(Color.white).frame(width: 16, height: 16).shadow(color: .black.opacity(0.18), radius: 1, y: 1).offset(x: configuration.isOn ? 7 : -7))
+                .frame(width: 34, height: 20).opacity(enabled ? 1 : 0.5)
+        }.buttonStyle(.plain).accessibilityLabel(label).accessibilityValue(configuration.isOn ? "On" : "Off")
+    }
+}
 private struct SettingsRow<Content: View>: View {
     let title: String
     var help: String? = nil
     @ViewBuilder var content: Content
-    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "info.circle").help(help) }; Spacer(); content }.frame(minHeight: 48) }
+    var body: some View { HStack(spacing: 8) { Text(title).lineLimit(1).fixedSize(horizontal: true, vertical: false); if let help { Image(systemName: "info.circle").help(help) }; Spacer(); content }.frame(minHeight: 48) }
 }
 private struct SoundPageView: View {
     @ObservedObject var controller: AppController
@@ -97,7 +108,7 @@ private struct SoundPageView: View {
                     }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause uses the system media control; Muffle lowers volume if system audio capture is unavailable.")
                 }
                 Divider()
-                HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)) }.frame(minHeight: 48)
+                HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.frame(minHeight: 48)
             }
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.secondary) }
         }.padding(.horizontal, 24).padding(.top, 16) }.font(.system(size: 14))
@@ -140,8 +151,8 @@ private struct LibraryPageView: View {
                         Text(item.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16).background(scheme == .dark ? Color(red: 60/255, green: 63/255, blue: 67/255) : Color(white: 253/255), in: RoundedRectangle(cornerRadius: 16))
                         HStack { Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.plain).disabled(controller.historyAudioURL(item) == nil); HStack(spacing: 1) { if let waveform = item.waveform, !waveform.isEmpty { ForEach(Array(waveform.enumerated()), id: \.offset) { _, amplitude in Capsule().fill(Color.primary.opacity(0.65)).frame(width: 1, height: max(2, CGFloat(amplitude) * 20)) } } else { Image(systemName: "waveform").foregroundStyle(.secondary) } }.frame(maxWidth: .infinity, minHeight: 24); Text(item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—").foregroundStyle(.secondary).font(.caption) }.padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                         HStack {
-                            Button("Original") { controller.historySegmented = false }.buttonStyle(.plain).padding(6).background(!controller.historySegmented ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                            Button("Segmented") { controller.historySegmented = true }.buttonStyle(.plain).padding(6).background(controller.historySegmented ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5)).disabled(item.segments?.isEmpty ?? true).help("Play speech segments detected from the recording")
+                            Button("Original") { controller.stopHistoryPlayback(); controller.historySegmented = false }.buttonStyle(.plain).padding(6).background(!controller.historySegmented ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                            Button("Segmented") { controller.stopHistoryPlayback(); controller.historySegmented = true }.buttonStyle(.plain).padding(6).background(controller.historySegmented ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5)).disabled(item.segments?.isEmpty ?? true).help("Play speech segments detected from the recording")
                         }.font(.caption)
                         if controller.historySegmented, let segments = item.segments {
                             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in Button { controller.toggleHistoryPlayback(item, segment: segment) } label: { HStack { Image(systemName: "play.fill"); Text("Segment \(index + 1)"); Spacer(); Text(String(format: "%.1fs – %.1fs", segment.start, segment.end)).foregroundStyle(.secondary) }.font(.caption).padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8)) }.buttonStyle(.plain) }
@@ -209,37 +220,37 @@ private struct ConfigurationPageView: View {
                 Divider()
                 HStack(alignment: .top) { Text("Recording window").padding(.top, 16); Spacer(); choices(["Classic", "Mini", "None"], selection: $recordingWindow, icons: ["waveform", "waveform", "eye.slash"]) }.padding(.vertical, 8)
                 Divider()
-                HStack(spacing: 8) { Text("Always show"); Image(systemName: "questionmark.circle").help("Keep the mini recording window visible"); Spacer(); Toggle("", isOn: $alwaysShow).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)).disabled(recordingWindow != "Mini") }.frame(height: 45)
+                HStack(spacing: 8) { Text("Always show"); Image(systemName: "questionmark.circle").help("Keep the mini recording window visible"); Spacer(); Toggle("", isOn: $alwaysShow).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Always show")).disabled(recordingWindow != "Mini") }.frame(height: 45)
             }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }.onChange(of: alwaysShow) { _ in controller.refreshRecordingWindow() }
             Text("Keyboard Shortcuts").font(.system(size: 14, weight: .semibold))
             SettingsCard {
                 shortcutRow("Toggle Recording", subtitle: "Starts and stops recordings", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); Divider()
                 shortcutRow("Cancel Recording", subtitle: "Discards the active recording", key: "cancelHotkeyCode", modifiers: nil, fallback: 53); Divider()
-                HStack { VStack(alignment: .leading, spacing: 2) { Text("Change mode"); Text("Activates the mode switcher").font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "arrow.counterclockwise"); keycap("⌥"); keycap("⇧"); keycap("K") }.frame(minHeight: 50).foregroundStyle(.secondary).help("Modes are not included in LightTTS"); Divider()
+                HStack { VStack(alignment: .leading, spacing: 2) { Text("Change mode"); Text("Activates the mode switcher").font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "arrow.counterclockwise"); keycap("⌥"); keycap("⇧"); keycap("K") }.frame(minHeight: 50).help("Modes are not included in LightTTS"); Divider()
                 shortcutRow("Push to Talk", subtitle: "Hold to record, release when done", key: "pushHotkeyCode", modifiers: "pushHotkeyModifiers", fallback: 49, enabled: "pushShortcutEnabled"); Divider()
                 HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); MouseShortcutRecorder().frame(width: 120, height: 28) }.frame(minHeight: 50)
             }
             Text("Application").font(.system(size: 14, weight: .semibold))
             SettingsCard {
                 SettingsRow(title: "Update application") { Button("Check for Updates…") { controller.checkUpdates() } }; Divider()
-                SettingsRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)) }; Divider()
-                SettingsRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: $controller.loginEnabled).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)).onChange(of: controller.loginEnabled) { value in do { if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch { controller.loginEnabled = SMAppService.mainApp.status == .enabled; controller.message = error.localizedDescription } } }; Divider()
-                SettingsRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)).help("Write errors to a local log") }; Divider()
+                SettingsRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; Divider()
+                SettingsRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: $controller.loginEnabled).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")).onChange(of: controller.loginEnabled) { value in do { if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch { controller.loginEnabled = SMAppService.mainApp.status == .enabled; controller.message = error.localizedDescription } } }; Divider()
+                SettingsRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Error logging")).help("Write errors to a local log") }; Divider()
                 SettingsRow(title: "Keep recordings for", help: "Automatically remove older recordings") { Picker("Keep recordings for", selection: retentionBinding) { Text("Forever").tag(0); Text("1 day").tag(1); Text("1 week").tag(7); Text("2 weeks").tag(14); Text("1 month").tag(30); Text("6 months").tag(180); Text("1 year").tag(365) }.labelsHidden().frame(width: 140) }
             }
             SettingsCard { Button { controller.showAdvanced.toggle() } label: { HStack { Text("Advanced settings"); Spacer(); Image(systemName: controller.showAdvanced ? "chevron.down" : "chevron.right").foregroundStyle(.secondary) }.frame(height: 48).contentShape(Rectangle()) }.buttonStyle(.plain) }
             if controller.showAdvanced {
                 Text("Text input").font(.system(size: 14, weight: .semibold))
                 SettingsCard {
-                    SettingsRow(title: "Paste result text") { Toggle("", isOn: $pasteResult).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)) }; Divider()
-                    SettingsRow(title: "Restore clipboard after pasting") { Toggle("", isOn: $restoreClipboard).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)).disabled(!pasteResult || simulateTyping) }; Divider()
-                    SettingsRow(title: "Hold Shift to auto-send") { Toggle("", isOn: $sendOnShift).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)).disabled(!pasteResult) }; Divider()
-                    SettingsRow(title: "Simulate keypresses") { Toggle("", isOn: $simulateTyping).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)).disabled(!pasteResult) }
+                    SettingsRow(title: "Paste result text") { Toggle("", isOn: $pasteResult).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Paste result text")) }; Divider()
+                    SettingsRow(title: "Restore clipboard after pasting") { Toggle("", isOn: $restoreClipboard).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Restore clipboard after pasting")).disabled(!pasteResult || simulateTyping) }; Divider()
+                    SettingsRow(title: "Hold Shift to auto-send") { Toggle("", isOn: $sendOnShift).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Hold Shift to auto-send")).disabled(!pasteResult) }; Divider()
+                    SettingsRow(title: "Simulate keypresses") { Toggle("", isOn: $simulateTyping).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Simulate keypresses")).disabled(!pasteResult) }
                 }
                 Text("Audio processing").font(.system(size: 14, weight: .semibold))
                 SettingsCard {
-                    SettingsRow(title: "Silence removal") { Toggle("", isOn: $removeSilence).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)) }; Divider()
-                    SettingsRow(title: "Dynamic normalization") { Toggle("", isOn: $normalizeAudio).labelsHidden().toggleStyle(.switch).tint(Color(red: 228/255, green: 92/255, blue: 156/255)) }; Divider()
+                    SettingsRow(title: "Silence removal") { Toggle("", isOn: $removeSilence).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Silence removal")) }; Divider()
+                    SettingsRow(title: "Dynamic normalization") { Toggle("", isOn: $normalizeAudio).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Dynamic normalization")) }; Divider()
                     SettingsRow(title: "Accessibility") { Button("Request Access") { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) } }
                 }
             }
@@ -295,6 +306,6 @@ private struct ConfigurationPageView: View {
     private func keyLabel(_ code: Int) -> String { let letters = [0:"A",1:"S",2:"D",3:"F",4:"H",5:"G",6:"Z",7:"X",8:"C",9:"V",11:"B",12:"Q",13:"W",14:"E",15:"R",16:"Y",17:"T",31:"O",32:"U",34:"I",35:"P",37:"L",38:"J",40:"K",45:"N",46:"M"]; return code == 49 ? "Space" : code == 53 ? "esc" : (letters[code] ?? "Key \(code)") }
     private func keycap(_ text: String) -> some View { Text(text).font(.system(size: 11, weight: .semibold)).padding(.horizontal, 6).padding(.vertical, 4).background(Color.primary.opacity(0.13), in: RoundedRectangle(cornerRadius: 4)) }
     private func shortcutRow(_ title: String, subtitle: String, key: String, modifiers: String?, fallback: Int, enabled: String? = nil) -> some View {
-        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); Button { if let enabled { UserDefaults.standard.set(false, forKey: enabled) } else { UserDefaults.standard.removeObject(forKey: key); if let modifiers { UserDefaults.standard.removeObject(forKey: modifiers) } }; controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark") }.buttonStyle(.plain); ZStack { HStack(spacing: 4) { if let enabled, !UserDefaults.standard.bool(forKey: enabled) { Text("Record shortcut").font(.system(size: 11)).foregroundStyle(.secondary) } else { let raw = modifiers == "pushHotkeyModifiers" ? pushHotkeyModifiers : (modifiers == nil ? 0 : hotkeyModifiers); let flags = NSEvent.ModifierFlags(rawValue: UInt(raw)); if flags.contains(.control) { keycap("⌃") }; if flags.contains(.option) { keycap("⌥") }; if flags.contains(.shift) { keycap("⇧") }; if flags.contains(.command) { keycap("⌘") }; let code = key == "cancelHotkeyCode" ? cancelHotkeyCode : (key == "pushHotkeyCode" ? pushHotkeyCode : hotkeyCode); keycap(keyLabel(code)) } }; ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).opacity(0.015) }.id("\(key)-\(hotkeyCode)-\(hotkeyModifiers)-\(cancelHotkeyCode)-\(pushShortcutEnabled)-\(pushHotkeyCode)-\(pushHotkeyModifiers)").frame(minWidth: 60, maxWidth: 120, minHeight: 28) }.frame(minHeight: 50)
+        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { SettingsDefaults.store.removeObject(forKey: key); if let modifiers { SettingsDefaults.store.removeObject(forKey: modifiers) } }; controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark") }.buttonStyle(.plain); ZStack { HStack(spacing: 4) { if let enabled, !SettingsDefaults.store.bool(forKey: enabled) { Text("Record shortcut").font(.system(size: 11)).foregroundStyle(.secondary) } else { let raw = modifiers == "pushHotkeyModifiers" ? pushHotkeyModifiers : (modifiers == nil ? 0 : hotkeyModifiers); let flags = NSEvent.ModifierFlags(rawValue: UInt(raw)); if flags.contains(.control) { keycap("⌃") }; if flags.contains(.option) { keycap("⌥") }; if flags.contains(.shift) { keycap("⇧") }; if flags.contains(.command) { keycap("⌘") }; let code = key == "cancelHotkeyCode" ? cancelHotkeyCode : (key == "pushHotkeyCode" ? pushHotkeyCode : hotkeyCode); keycap(keyLabel(code)) } }; ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).opacity(0.015) }.id("\(key)-\(hotkeyCode)-\(hotkeyModifiers)-\(cancelHotkeyCode)-\(pushShortcutEnabled)-\(pushHotkeyCode)-\(pushHotkeyModifiers)").frame(minWidth: 60, maxWidth: 120, minHeight: 28) }.frame(minHeight: 50)
     }
 }

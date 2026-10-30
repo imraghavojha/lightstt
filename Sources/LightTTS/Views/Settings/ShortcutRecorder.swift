@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+enum SettingsDefaults {
+    static var store: UserDefaults { CommandLine.arguments.contains("--ui-fixture") ? (UserDefaults(suiteName: "com.lighttts.ui-fixture") ?? .standard) : .standard }
+}
+
 struct ShortcutRecorder: NSViewRepresentable {
     let codeKey: String
     let modifiersKey: String?
@@ -27,15 +31,15 @@ final class ShortcutButton: NSButton {
         guard recording else { super.keyDown(with: event); return }
         let flags = event.modifierFlags.intersection([.option, .command, .control, .shift])
         if modifiersKey != nil && flags.isEmpty { NSSound.beep(); return }
-        UserDefaults.standard.set(Int(event.keyCode), forKey: codeKey)
-        if let enabledKey { UserDefaults.standard.set(true, forKey: enabledKey) }
-        if let modifiersKey { UserDefaults.standard.set(Int(flags.rawValue), forKey: modifiersKey); UserDefaults.standard.set(false, forKey: "rightOption") }
+        SettingsDefaults.store.set(Int(event.keyCode), forKey: codeKey)
+        if let enabledKey { SettingsDefaults.store.set(true, forKey: enabledKey) }
+        if let modifiersKey { SettingsDefaults.store.set(Int(flags.rawValue), forKey: modifiersKey); SettingsDefaults.store.set(false, forKey: "rightOption") }
         recording = false; Self.isRecording = false; refresh(); window?.makeFirstResponder(nil)
     }
     override func resignFirstResponder() -> Bool { recording = false; Self.isRecording = false; refresh(); return super.resignFirstResponder() }
     func refresh() {
         guard !recording else { return }
-        let defaults = UserDefaults.standard
+        let defaults = SettingsDefaults.store
         if let enabledKey, !defaults.bool(forKey: enabledKey) { title = "Record…"; return }
         let code = defaults.object(forKey: codeKey) as? Int ?? fallbackCode
         let raw = modifiersKey.flatMap { defaults.object(forKey: $0) as? Int } ?? (modifiersKey == nil ? 0 : Int(NSEvent.ModifierFlags.option.rawValue))
@@ -63,7 +67,7 @@ final class MouseShortcutButton: NSButton {
     required init?(coder: NSCoder) { fatalError() }
     @objc private func begin() { Self.isRecording = true; title = "Click a mouse button"; window?.makeFirstResponder(self) }
     override var acceptsFirstResponder: Bool { true }
-    override func otherMouseDown(with event: NSEvent) { guard Self.isRecording else { super.otherMouseDown(with: event); return }; UserDefaults.standard.set(event.buttonNumber, forKey: "mouseShortcut"); Self.isRecording = false; refresh(); window?.makeFirstResponder(nil) }
+    override func otherMouseDown(with event: NSEvent) { guard Self.isRecording else { super.otherMouseDown(with: event); return }; SettingsDefaults.store.set(event.buttonNumber, forKey: "mouseShortcut"); Self.isRecording = false; refresh(); window?.makeFirstResponder(nil) }
     override func resignFirstResponder() -> Bool { Self.isRecording = false; refresh(); return super.resignFirstResponder() }
-    func refresh() { guard !Self.isRecording else { return }; let value = UserDefaults.standard.object(forKey: "mouseShortcut") as? Int ?? -1; title = value < 0 ? "Record shortcut" : "Mouse \(value + 1)"; font = .systemFont(ofSize: 12, weight: .medium); contentTintColor = .secondaryLabelColor }
+    func refresh() { guard !Self.isRecording else { return }; let value = SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1; title = value < 0 ? "Record shortcut" : "Mouse \(value + 1)"; font = .systemFont(ofSize: 12, weight: .medium); contentTintColor = .secondaryLabelColor }
 }

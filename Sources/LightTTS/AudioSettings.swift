@@ -85,6 +85,7 @@ final class AudioSettings {
         }
         pauseSession.end()
     }
+    func waitForRestoration() async { await withCheckedContinuation { continuation in muffleQueue.async { continuation.resume() } } }
     static func cue(start: Bool) {
         guard (ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty else { return }
         let defaults = UserDefaults.standard

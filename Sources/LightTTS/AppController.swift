@@ -8,6 +8,7 @@ import ServiceManagement
 @MainActor final class AppController: NSObject, ObservableObject {
     @Published var state = "idle"
     @Published var settingsSelection = "Sound"
+    private var previousSettingsSelection = "Sound"
     @Published var level: Float = 0
     @Published var started = Date()
     @Published var message = ""
@@ -99,6 +100,12 @@ import ServiceManagement
         }
     }
     #endif
+    func selectSettings(_ selection: String) {
+        if selection == "Library" && settingsSelection != "Library" { previousSettingsSelection = settingsSelection }
+        if selection != "Library" { stopHistoryPlayback(); selectedHistory = nil; historySearchVisible = false; historySearch = "" }
+        settingsSelection = selection
+    }
+    func leaveLibrary() { historySearchVisible = false; historySearch = ""; selectSettings(previousSettingsSelection) }
     func warmSelected() {
         let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
         guard selected != loadedID, selected != warmingID, let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { return }
@@ -348,7 +355,7 @@ import ServiceManagement
         } catch { message = error.localizedDescription }
     }
     func cancelDownload() { downloadTask?.cancel() }
-    func prepareToQuit() async { let task = downloadTask; task?.cancel(); await task?.value }
+    func prepareToQuit() async { if state != "idle" { cancel() }; await audioSettings.waitForRestoration(); let task = downloadTask; task?.cancel(); await task?.value }
     func download(_ model: Model) {
         guard busyModel == nil else { return }
         busyModel = model.id; downloadProgress = 0

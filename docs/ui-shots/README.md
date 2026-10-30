@@ -1,6 +1,6 @@
 # Settings visual comparisons
 
-The `settings-*` images show LightTTS at 2× in both appearances and presentations. Library images use synthetic entries supplied by `--ui-fixture`; fixture history is stored separately from the user's history. Detail captures use the synthetic WAV and synthetic metadata; no audio is played during capture. The empty Models host is intentional and will be filled by the models work.
+The `settings-*` images show LightTTS at 2× in both appearances and presentations. Library images use synthetic entries supplied by `--ui-fixture`; fixture history and fixture settings use a separate temporary history file and preferences suite. Detail captures use the synthetic WAV and synthetic metadata; no audio is played during capture. The empty Models host is intentional and will be filled by the models work.
 
 The `ref-settings-*` images are reference-only Superwhisper captures. The History references are limited to a header or an empty search result to avoid including personal transcripts. Superwhisper presents its settings as a window, so the same window references inform both LightTTS presentations.
 
