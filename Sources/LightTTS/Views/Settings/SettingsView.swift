@@ -335,21 +335,8 @@ private struct PageRule: View {
 private struct RetentionPopup: View {
     @Binding var selection: Int
     private let options = [(0, "Forever"), (1, "1 day"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (180, "6 months"), (365, "1 year")]
-    private let surface = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 75/255, green: 77/255, blue: 82/255, alpha: 1)
-            : NSColor(srgbRed: 253/255, green: 253/255, blue: 253/255, alpha: 1)
-    }))
     var body: some View {
-        Menu {
-            ForEach(options, id: \.0) { option in Button(option.1) { selection = option.0 } }
-        } label: {
-            HStack { Text(options.first(where: { $0.0 == selection })?.1 ?? "Forever"); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }
-                .padding(.horizontal, 9).frame(width: 125, height: 28)
-                .background(surface, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.18), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.10), radius: 1, y: 1)
-        }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 125, height: 28)
+        SettingsPopup(selection: $selection, options: options, width: 125).frame(width: 125, height: 28)
     }
 }
 
