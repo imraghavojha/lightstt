@@ -15,6 +15,10 @@ struct LibraryPageView: View {
         ZStack(alignment: .trailing) {
             VStack(spacing: 0) {
                 header
+                if let warning = controller.historyWarning {
+                    HStack { Image(systemName: "exclamationmark.triangle"); Text(warning); Spacer(); Button { controller.historyWarning = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).help("Dismiss") }
+                        .font(.system(size: 11)).padding(10).background(Color.orange.opacity(0.15))
+                }
                 content
             }
             if state.drawer, let item = selected {

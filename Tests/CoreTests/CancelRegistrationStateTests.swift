@@ -2,6 +2,15 @@ import XCTest
 @testable import LightTTSCore
 
 final class CancelRegistrationStateTests: XCTestCase {
+    func testProcessingAndLoadingRemainCancelable() {
+        for session in ["starting", "recording", "processing", "loading"] {
+            XCTAssertTrue(CancelRegistrationState.isActiveSession(session))
+        }
+        for session in ["idle", "done", "error"] {
+            XCTAssertFalse(CancelRegistrationState.isActiveSession(session))
+        }
+    }
+
     func testRegistrationFollowsRecordingAndMonitorLifecycle() {
         var state = CancelRegistrationState()
         XCTAssertFalse(state.shouldRegister)

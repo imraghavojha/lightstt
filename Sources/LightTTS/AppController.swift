@@ -16,7 +16,7 @@ import IOKit.ps
 @MainActor final class ModelProgress: ObservableObject { @Published var value: Double = 0 }
 
 @MainActor final class AppController: NSObject, ObservableObject {
-    @Published var state = "idle" { didSet { hotkey.setRecording(state == "starting" || state == "recording") } }
+    @Published var state = "idle" { didSet { hotkey.setRecording(CancelRegistrationState.isActiveSession(state)) } }
     @Published var settingsSelection = "Sound"
     private var previousSettingsSelection = "Sound"
     let recordingLevel = RecordingLevel()
@@ -24,6 +24,7 @@ import IOKit.ps
     @Published var message = ""
     @Published var copiedToClipboard = false
     @Published var history: [HistoryEntry] = []
+    @Published var historyWarning: String?
     @Published var historySearch = ""
     @Published var historySearchVisible = false
     @Published var selectedHistory: HistoryEntry?
@@ -70,6 +71,8 @@ import IOKit.ps
     private var generation = 0
     @Published var historyMigration: Progress?
     private let historyQueue = DispatchQueue(label: "com.lighttts.history", qos: .utility)
+    private let historyPersistence = HistoryPersistence()
+    private var pendingHistoryAudio: [String: Data] = [:]
     var historyURL: URL {
         let fixture = CommandLine.arguments.contains("--ui-fixture") || !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
         let configured = UserDefaults.standard.string(forKey: "historyFolder")
@@ -271,7 +274,7 @@ import IOKit.ps
     }
     func toggleRecording() {
         if state == "error" { cancel() }
-        if state == "starting" { cancel() }
+        if ["starting", "processing", "loading"].contains(state) { cancel() }
         else if state == "recording" { stop() }
         else if state == "idle" { start() }
     }
@@ -459,11 +462,10 @@ import IOKit.ps
                 if !isTestAudio {
                     let analysis = await Task.detached(priority: .utility) { (AudioProcessing.speechSegments(rawSamples), AudioProcessing.waveform(rawSamples)) }.value
                     item.segments = analysis.0; item.waveform = analysis.1
-                    let directory = self.historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true)
                     let filename = item.id.uuidString + ".wav"
-                    let written = await Task.detached(priority: .utility) { Self.writeRecording(rawSamples, to: directory.appendingPathComponent(filename)) }.value
-                    if written { item.audioFile = filename }
-                    if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
+                    let recording = await Task.detached(priority: .utility) { Self.recordingData(rawSamples) }.value
+                    guard !Task.isCancelled, current == generation else { return }
+                    item.audioFile = filename; pendingHistoryAudio[filename] = recording
                 }
                 panelDeadline?.cancel()
                 history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; copiedToClipboard = copied; if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { state = "idle"; scheduleEngineUnload() } else { state = "done" }; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
@@ -566,13 +568,15 @@ import IOKit.ps
         catch { message = error.localizedDescription }
         refreshLoginStatus()
     }
-    nonisolated private static func writeRecording(_ samples: [Float], to url: URL) -> Bool {
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false), let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)), let data = buffer.floatChannelData?[0] else { return false }
-            buffer.frameLength = AVAudioFrameCount(samples.count); samples.withUnsafeBufferPointer { if let base = $0.baseAddress { data.update(from: base, count: samples.count) } }
-            let file = try AVAudioFile(forWriting: url, settings: format.settings); try file.write(from: buffer); return true
-        } catch { return false }
+    nonisolated private static func recordingData(_ samples: [Float]) -> Data {
+        var result = Data()
+        func append<T: FixedWidthInteger>(_ value: T) { var value = value.littleEndian; withUnsafeBytes(of: &value) { result.append(contentsOf: $0) } }
+        let size = UInt32(samples.count * MemoryLayout<Float>.size)
+        result.append(contentsOf: "RIFF".utf8); append(size + 36); result.append(contentsOf: "WAVEfmt ".utf8)
+        append(UInt32(16)); append(UInt16(3)); append(UInt16(1)); append(UInt32(16000)); append(UInt32(64000)); append(UInt16(4)); append(UInt16(32))
+        result.append(contentsOf: "data".utf8); append(size)
+        for sample in samples { append(sample.bitPattern) }
+        return result
     }
     func historyAudioURL(_ item: HistoryEntry) -> URL? {
         guard let file = item.audioFile, file == item.id.uuidString + ".wav" else { return nil }
@@ -632,10 +636,25 @@ import IOKit.ps
         historyQueue.async { for name in names { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) } }
     }
     private func saveHistory() {
-        let snapshot = history, url = historyURL
-        historyQueue.async {
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: url, options: .atomic) }
+        let snapshot = history, url = historyURL, recordings = pendingHistoryAudio
+        pendingHistoryAudio.removeAll()
+        let fallback = ModelStore.directory.deletingLastPathComponent()
+        let configured = UserDefaults.standard.string(forKey: "historyFolder") != nil && !CommandLine.arguments.contains("--ui-fixture") && !isTestAudio
+        historyQueue.async { [weak self, historyPersistence] in
+            for (name, data) in recordings { historyPersistence.enqueueRecording(data, named: name) }
+            let result: (folder: URL, fellBack: Bool, error: Error?)
+            do { result = historyPersistence.save(try JSONEncoder().encode(snapshot), in: url.deletingLastPathComponent(), fallback: configured ? fallback : nil) }
+            catch { result = (url.deletingLastPathComponent(), false, error) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let changedFolder = result.fellBack && UserDefaults.standard.string(forKey: "historyFolder") == url.deletingLastPathComponent().path
+                if changedFolder { UserDefaults.standard.removeObject(forKey: "historyFolder") }
+                if let error = result.error {
+                    let prefix = changedFolder ? "History folder unavailable; using Application Support. " : ""
+                    self.historyWarning = prefix + "History could not be saved: \(error.localizedDescription). It will be retried on the next save."
+                } else if changedFolder { self.historyWarning = "History folder unavailable. Using Application Support instead." }
+                else if !result.fellBack && self.historyWarning?.contains("History could not be saved:") == true { self.historyWarning = nil }
+            }
         }
     }
     func importLocalModel(engine: String = "whisper", version: String = "") {
