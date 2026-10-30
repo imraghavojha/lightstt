@@ -27,7 +27,7 @@ struct CompactMenuView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var controller: AppController
     let openSettings: () -> Void
-    @AppStorage("selectedModel") private var selectedModel = "whisper-tiny.en"
+    @AppStorage("selectedModel") private var selectedModel = ModelDefaults.selectedModel
     @AppStorage("inputDeviceUID") private var selectedInput = ""
     @AppStorage("autoPaste") private var autoPaste = true
     @AppStorage("pushShortcutEnabled") private var pushShortcutEnabled = false

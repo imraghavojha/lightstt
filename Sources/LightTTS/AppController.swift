@@ -210,7 +210,7 @@ import IOKit.ps
     }
     func leaveLibrary() { historySearchVisible = false; historySearch = ""; selectSettings(previousSettingsSelection) }
     func warmSelected() {
-        let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+        let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? ModelDefaults.selectedModel
         guard selected != loadedID, selected != warmingID, let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { return }
         warming?.cancel()
         warmingID = selected; warmingToken = UUID()
@@ -373,7 +373,7 @@ import IOKit.ps
             defer { withExtendedLifetime(finishedCapture) {} }
             LaunchTrace.mark("processing-task-start")
             do {
-                let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+                let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? ModelDefaults.selectedModel
                 LaunchTrace.mark("model-check-start")
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
                 LaunchTrace.mark("model-check-end")
@@ -578,7 +578,7 @@ import IOKit.ps
         guard reprocessingHistoryID == nil, historyMigration == nil, let url = historyAudioURL(item) else { return }
         reprocessingHistoryID = item.id; historyProcessingError = nil
         if state == "starting" || state == "recording" { pendingHistoryReprocess = item; return }
-        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
+        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? ModelDefaults.selectedModel
         Task {
             do {
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
@@ -740,7 +740,7 @@ import IOKit.ps
             do {
                 try await Task.detached(priority: .userInitiated) { if ModelStore.exists(model) { try ModelStore.delete(model) } }.value
                 if model.id.hasPrefix("custom-") { models.removeAll { $0.id == model.id }; let custom = models.filter { $0.id.hasPrefix("custom-") }; UserDefaults.standard.set(try JSONEncoder().encode(custom), forKey: "customModels") }
-                if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set("whisper-tiny.en", forKey: "selectedModel"); unloadEngine() }
+                if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set(ModelDefaults.selectedModel, forKey: "selectedModel"); unloadEngine() }
                 if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
             } catch { message = error.localizedDescription }
             busyModel = nil; modelOperation = nil; objectWillChange.send()

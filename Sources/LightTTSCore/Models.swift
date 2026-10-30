@@ -21,6 +21,9 @@ public struct Model: Codable, Identifiable, Hashable {
     public var fallbackID: String? = nil
     public init(id: String, name: String, engine: String, url: URL? = nil, version: String? = nil, sha256: String? = nil, size: Int64? = nil) { self.id = id; self.name = name; self.engine = engine; self.url = url; self.version = version; self.sha256 = sha256; self.size = size }
 }
+public enum ModelDefaults {
+    public static let selectedModel = "parakeet-v3"
+}
 public enum ModelCatalog {
     public static func load() throws -> [Model] {
         let catalog = try JSONDecoder().decode([Model].self, from: Data(contentsOf: Bundle.module.url(forResource: "models", withExtension: "json")!))
