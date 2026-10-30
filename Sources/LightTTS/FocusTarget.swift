@@ -10,6 +10,12 @@ final class FocusTarget: @unchecked Sendable {
         if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE delivery %@", message()) }
     }
     private let pid: pid_t
+    private let element: AXUIElement?
+    private let window: AXUIElement?
+    let shiftHeldAtStop: Bool
+    private typealias ClipboardSnapshot = [[(NSPasteboard.PasteboardType, Data)]]
+    private static let pasteLock = NSLock()
+    private static let restoration = PasteRestoration<ClipboardSnapshot>()
     let stopDisposition: FocusDisposition
     private static let cacheLock = NSLock()
     private static var enabledPIDs: Set<pid_t> = []
@@ -30,10 +36,10 @@ final class FocusTarget: @unchecked Sendable {
         guard let url = app?.bundleURL else { return false }
         return FileManager.default.fileExists(atPath: url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path)
     }
-    private init(pid: pid_t, disposition: FocusDisposition) {
-        self.pid = pid; self.stopDisposition = disposition
+    private init(pid: pid_t, disposition: FocusDisposition, element: AXUIElement?, window: AXUIElement?, shiftHeld: Bool) {
+        self.pid = pid; self.stopDisposition = disposition; self.element = element; self.window = window; self.shiftHeldAtStop = shiftHeld
     }
-    static func capture(frontPID: pid_t?) -> (target: FocusTarget?, secure: Bool) {
+    static func capture(frontPID: pid_t?, shiftHeld: Bool = false) -> (target: FocusTarget?, secure: Bool) {
         let secure = IsSecureEventInputEnabled()
         guard let pid = frontPID else { return (nil, secure) }
         let running = NSRunningApplication(processIdentifier: pid)
@@ -61,7 +67,12 @@ final class FocusTarget: @unchecked Sendable {
         case .uncertain: reason = "focus not conclusively classified"
         }
         trace("stop bundle=\(running?.bundleIdentifier ?? "nil") pid=\(pid) role=\(role ?? "nil") subrole=\(subrole ?? "nil") secureInput=\(secure) opaque=\(opaque) decision=\(disposition) reason=\(reason)")
-        return (FocusTarget(pid: pid, disposition: disposition), secure)
+        let window = focusedWindow(app)
+        return (FocusTarget(pid: pid, disposition: disposition, element: element, window: window, shiftHeld: shiftHeld), secure)
+    }
+    private static func focusedWindow(_ app: AXUIElement) -> AXUIElement? {
+        guard let value = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
     }
     private func requireSafeFocus() throws {
         let front = NSWorkspace.shared.frontmostApplication
@@ -69,7 +80,9 @@ final class FocusTarget: @unchecked Sendable {
         guard frontmostPID() == pid else { throw FocusError.changed }
         guard !IsSecureEventInputEnabled() else { throw FocusError.secure }
         let app = AXUIElementCreateApplication(pid); AXUIElementSetMessagingTimeout(app, 0.5)
-        if let element = Self.focused(app) {
+        let currentElement = Self.focused(app)
+        guard focusMatches(capturedElement: element, currentElement: currentElement, capturedWindow: window, currentWindow: Self.focusedWindow(app), equal: { CFEqual($0, $1) }) else { throw FocusError.changed }
+        if let element = currentElement {
             let role = Self.attribute(element, kAXRoleAttribute) as? String
             let subrole = Self.attribute(element, kAXSubroleAttribute) as? String
             if role == "AXSecureTextField" || subrole == "AXSecureTextField" { throw FocusError.secure }
@@ -78,54 +91,55 @@ final class FocusTarget: @unchecked Sendable {
     private func frontmostPID() -> pid_t? {
         NSWorkspace.shared.frontmostApplication?.processIdentifier
     }
-    func sendReturn() throws {
+    func sendReturn(isCurrent: () -> Bool = { true }) throws {
+        guard isCurrent() else { throw FocusError.cancelled }
         try requireSafeFocus()
+        guard isCurrent() else { throw FocusError.cancelled }
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] { let event = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: down); event?.flags = []; event?.post(tap: .cghidEventTap) }
     }
-    func paste(_ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool) throws {
+    func paste(_ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool, isCurrent: () -> Bool = { true }) throws {
+        try requireSafeFocus()
+        let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate]
+        let deadline = ProcessInfo.processInfo.systemUptime + 2.0
+        try waitForPasteModifiers(
+            modifiersHeld: { !CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty },
+            isCurrent: isCurrent, timedOut: { ProcessInfo.processInfo.systemUptime >= deadline },
+            pause: { Thread.sleep(forTimeInterval: 0.01) })
         try requireSafeFocus()
         let board = NSPasteboard.general
-        Self.trace("pasteboard before=\(board.changeCount) restore=\(restoreClipboard)")
-        let saved = (board.pasteboardItems ?? []).map { item in
-            item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
+        guard isCurrent() else { throw FocusError.cancelled }
+        Self.pasteLock.lock()
+        let saved = Self.restoration.original(currentCount: board.changeCount) {
+            (board.pasteboardItems ?? []).map { item in
+                item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
+            }
         }
         let item = transcriptPasteboardItem(text, allowClipboardHistory: allowClipboardHistory)
         board.clearContents(); board.writeObjects([item])
         let count = board.changeCount
-        Self.trace("pasteboard transcript=\(count)")
-        let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate, .maskSecondaryFn]
-        let waitStart = ProcessInfo.processInfo.systemUptime
-        let deadline = waitStart + 2.0
-        while true {
-            let flags = CGEventSource.flagsState(.combinedSessionState).intersection(modifiers)
-            if flags.isEmpty { break }
-            guard ProcessInfo.processInfo.systemUptime < deadline else { Self.trace("modifier timeout"); throw FocusError.modifiersHeld }
-            Thread.sleep(forTimeInterval: min(0.01, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
-        }
-        Self.trace("modifier waitMs=\((ProcessInfo.processInfo.systemUptime - waitStart) * 1000)")
+        Self.restoration.published(count: count, original: saved, restore: restoreClipboard)
+        Self.pasteLock.unlock()
         try requireSafeFocus()
+        try verifyPasteOwnership(expected: count, current: { board.changeCount }, isCurrent: isCurrent)
         let source = CGEventSource(stateID: .hidSystemState)
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else { throw FocusError.eventCreationFailed }
         keyDown.flags = .maskCommand; keyUp.flags = .maskCommand
-        Self.trace("post keycode=9 flags=command tap=annotatedSession source=hidSystemState")
         keyDown.post(tap: .cgAnnotatedSessionEventTap)
         Thread.sleep(forTimeInterval: 0.01)
         keyUp.post(tap: .cgAnnotatedSessionEventTap)
         if restoreClipboard {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                Self.trace("restore attempt current=\(board.changeCount) expected=\(count)")
-                if board.changeCount == count {
-                    let items = saved.map { values -> NSPasteboardItem in
-                        let item = NSPasteboardItem()
-                        for (type, data) in values { item.setData(data, forType: type) }
-                        return item
-                    }
-                    board.clearContents()
-                    if !items.isEmpty { board.writeObjects(items) }
-                    Self.trace("restore done count=\(board.changeCount)")
+                Self.pasteLock.lock(); defer { Self.pasteLock.unlock() }
+                guard let saved = Self.restoration.takeForRestore(expectedCount: count, currentCount: board.changeCount) else { return }
+                let items = saved.map { values -> NSPasteboardItem in
+                    let item = NSPasteboardItem()
+                    for (type, data) in values { item.setData(data, forType: type) }
+                    return item
                 }
+                board.clearContents()
+                if !items.isEmpty { board.writeObjects(items) }
             }
         }
     }

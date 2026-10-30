@@ -3,8 +3,9 @@ import Foundation
 public enum FocusDisposition: Sendable {
     case editable, uncertain, secure, unavailable
 }
-public enum FocusError: LocalizedError {
-    case secure, unavailable, changed, modifiersHeld, eventCreationFailed
+public enum FocusError: LocalizedError, Equatable {
+    case secure, unavailable, changed, modifiersHeld, eventCreationFailed, clipboardChanged,
+        cancelled
     public var errorDescription: String? {
         switch self {
         case .secure: return "Copied: secure field"
@@ -12,6 +13,8 @@ public enum FocusError: LocalizedError {
         case .changed: return "The focused field or app changed before text could be inserted"
         case .modifiersHeld: return "Release the shortcut keys before pasting"
         case .eventCreationFailed: return "Could not create paste keyboard events"
+        case .clipboardChanged: return "The clipboard changed before pasting"
+        case .cancelled: return "Delivery cancelled"
         }
     }
 }
@@ -28,6 +31,11 @@ public func focusDisposition(
         return .editable
     }
     if isFinder { return .unavailable }
+    let nonEditable = [
+        "AXButton", "AXCheckBox", "AXRadioButton", "AXList", "AXTable", "AXOutline", "AXMenu",
+        "AXMenuItem", "AXMenuBar", "AXStaticText", "AXImage", "AXSlider", "AXTabGroup",
+    ]
+    if !isOpaqueApp, let role, nonEditable.contains(role) { return .unavailable }
     return .uncertain
 }
 
