@@ -21,6 +21,14 @@ struct Shortcut {
 }
 
 @MainActor final class HotkeyMonitor {
+    // Optional injected configuration is used by the runtime bridge; the legacy app
+    // continues to read its existing settings until it is migrated.
+    var configuredShortcuts: [UInt32: Shortcut]?
+    var configuredMouseButton: Int?
+    var captureSuspended: (() -> Bool)?
+    private var toggleShortcut: Shortcut { configuredShortcuts?[1] ?? .toggle }
+    private var pushShortcut: Shortcut { configuredShortcuts?[2] ?? .push }
+    private var cancelShortcut: Shortcut { configuredShortcuts?[3] ?? .cancel }
     private var handler: EventHandlerRef?
     private var refs: [UInt32: EventHotKeyRef] = [:]
     private var global: Any?
@@ -45,8 +53,8 @@ struct Shortcut {
             return noErr
         }, types.count, &types, Unmanaged.passUnretained(self).toOpaque(), &handler)
         cancelState.setInstalled(true)
-        register(Shortcut.toggle, id: 1)
-        if pushAvailable { register(Shortcut.push, id: 2) }
+        register(toggleShortcut, id: 1)
+        if pushAvailable { register(pushShortcut, id: 2) }
         if AXIsProcessTrusted() {
             local = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .otherMouseDown, .otherMouseUp]) { [weak self] event in
                 MainActor.assumeIsolated { self?.handle(event, currentFlags: UInt(CGEventSource.flagsState(.combinedSessionState).rawValue)) }; return event
@@ -68,7 +76,7 @@ struct Shortcut {
         }
         return !registrationFailed
     }
-    private var pushAvailable: Bool { SettingsDefaults.store.bool(forKey: "pushShortcutEnabled") && !Shortcut.same(.toggle, .push) }
+    private var pushAvailable: Bool { (configuredShortcuts == nil ? SettingsDefaults.store.bool(forKey: "pushShortcutEnabled") : configuredShortcuts?[2] != nil) && !Shortcut.same(toggleShortcut, pushShortcut) }
     private func register(_ shortcut: Shortcut, id: UInt32) {
         guard !shortcut.modifierOnly else { return }
         var ref: EventHotKeyRef?
@@ -85,33 +93,33 @@ struct Shortcut {
         if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE cancel %@", status) }
     }
     private func registerCancel() {
-        let shortcut = Shortcut.cancel
+        let shortcut = cancelShortcut
         if shortcut.modifierOnly { traceCancel("modifier cancel uses flags monitor") }
         else { register(shortcut, id: 3) }
     }
     private func dispatch(_ id: UInt32, _ down: Bool) {
         traceCancel("dispatch id=\(id) down=\(down) recording=\(recording)")
-        guard !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return }
+        guard !(captureSuspended?() ?? (ShortcutButton.isRecording || MouseShortcutButton.isRecording)) else { return }
         if id == 1 { if toggleState.key(down) { onShortcut?(true) }; return }
         if down { toggleState.usedInChord(); guard active.insert(id).inserted else { return } } else { guard active.remove(id) != nil else { return } }
         switch id { case 2: onPush?(down); case 3: if down && recording { onEscape?() }; case 4: onMouse?(down); default: break }
     }
     private func handle(_ event: NSEvent, currentFlags: UInt) {
         if event.type == .otherMouseDown || event.type == .otherMouseUp {
-            guard event.buttonNumber == (SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1) else { return }
+            guard event.buttonNumber == (configuredMouseButton ?? (SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1)) else { return }
             dispatch(4, event.type == .otherMouseDown); return
         }
         if event.type == .keyDown {
             toggleState.usedInChord()
             return
         }
-        let shortcuts: [(UInt32, Shortcut)] = [(1, .toggle)] + (pushAvailable ? [(2, .push)] : []) + (recording ? [(3, .cancel)] : [])
+        let shortcuts: [(UInt32, Shortcut)] = [(1, toggleShortcut)] + (pushAvailable ? [(UInt32(2), pushShortcut)] : []) + (recording ? [(UInt32(3), cancelShortcut)] : [])
         let masks: [Int: UInt] = [54: 0x10, 55: 0x08, 56: 0x02, 60: 0x04, 58: 0x20, 61: 0x40, 59: 0x01, 62: 0x2000]
-        if Shortcut.toggle.modifierOnly {
-            if toggleState.flagsChanged(code: Int(event.keyCode), shortcutCode: Shortcut.toggle.code, eventFlags: event.modifierFlags.rawValue, currentFlags: currentFlags) { onShortcut?(true) }
+        if toggleShortcut.modifierOnly {
+            if toggleState.flagsChanged(code: Int(event.keyCode), shortcutCode: toggleShortcut.code, eventFlags: event.modifierFlags.rawValue, currentFlags: currentFlags) { onShortcut?(true) }
         }
         // Recover a missed modifier push-to-talk release even when this event is unrelated.
-        if pushAvailable && Shortcut.push.modifierOnly && Int(event.keyCode) != Shortcut.push.code && currentFlags & (masks[Shortcut.push.code] ?? 0) == 0 && active.contains(2) { dispatch(2, false) }
+        if pushAvailable && pushShortcut.modifierOnly && Int(event.keyCode) != pushShortcut.code && currentFlags & (masks[pushShortcut.code] ?? 0) == 0 && active.contains(2) { dispatch(2, false) }
         for (id, shortcut) in shortcuts where id != 1 && shortcut.modifierOnly && shortcut.code == Int(event.keyCode) {
             let down = event.modifierFlags.rawValue & (masks[shortcut.code] ?? 0) != 0
             dispatch(id, down)
