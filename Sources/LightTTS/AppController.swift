@@ -17,6 +17,7 @@ import LightTTSCore
     var onCatalogReady: (() -> Void)?
     private var downloadTask: Task<Void, Never>?
     private var engine: (any TranscriptionEngine)?
+    private var unloadTimer: Timer?
     private var loadedID = ""
     private var warmingID = ""
     private var warmingToken = UUID()
@@ -48,7 +49,7 @@ import LightTTSCore
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == "idle", ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] == nil else { return }
-                if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.panel?.orderOut(nil) }
+                if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
             }
         }
         #if DEBUG
@@ -74,6 +75,7 @@ import LightTTSCore
         let token = warmingToken
         let task = Task.detached(priority: .utility) { try await ModelStore.engine(for: model) }
         warming = task
+        if state == "idle" || state == "error" { scheduleEngineUnload() }
         Task { [weak self] in
             do { _ = try await task.value }
             catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = "" }
@@ -108,8 +110,10 @@ import LightTTSCore
     }
     func start() {
         guard state == "idle" else { return }
+        unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         state = "starting"
+        warmSelected()
         sessionAutoPaste = UserDefaults.standard.object(forKey: "autoPaste") as? Bool ?? true
         focus = nil
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
@@ -189,6 +193,7 @@ import LightTTSCore
     func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; hide() }
     private func hide() {
         state = "idle"; level = 0
+        scheduleEngineUnload()
         if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { showPanel() }
         else if let panel {
             let current = generation
@@ -196,12 +201,35 @@ import LightTTSCore
                 Task { @MainActor in
                     guard let self, self.generation == current, self.state == "idle", !UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") else { return }
                     panel?.orderOut(nil)
+                    if self.panel === panel { self.panel = nil }
                 }
             }
         }
     }
     func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; level = 0; showPanel() }
-    private func fail(_ text: String) { message = text; state = "error"; showPanel() }
+    private func dismissPanel() {
+        panel?.orderOut(nil)
+        panel = nil
+    }
+    // One coalescible, non-repeating timer only while a model is resident or loading.
+    // Set modelIdleTimeoutSeconds in defaults to change the five-minute default.
+    private func scheduleEngineUnload() {
+        unloadTimer?.invalidate(); unloadTimer = nil
+        guard engine != nil || warming != nil else { return }
+        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") as? Double ?? 300
+        let interval = max(1, configured)
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state == "idle" || self.state == "error" else { return }
+                self.warmingToken = UUID(); self.warming?.cancel(); self.warming = nil; self.warmingID = ""
+                self.engine = nil; self.loadedID = ""; self.unloadTimer = nil
+            }
+        }
+        timer.tolerance = min(30, interval * 0.1)
+        RunLoop.main.add(timer, forMode: .common)
+        unloadTimer = timer
+    }
+    private func fail(_ text: String) { message = text; state = "error"; scheduleEngineUnload(); showPanel() }
     private func showPanel() {
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)

@@ -8,3 +8,23 @@ For end-to-end verification, a debug app used `LIGHTTTS_TEST_AUDIO` to feed a `s
 
 
 On a later release build, readiness was redefined to require both catalog availability and a successfully installed hotkey. Five sequential launches, with tracing enabled and other apps running, reached that marker in **481.8, 235.5, 235.3, 696.5, and 523.5 ms**. These are not controlled cold-cache samples; none met 200 ms. Trace points cover entry to `main`, AppKit initialization, status-item creation, catalog availability and hotkey installation. Heavy inference dependencies remain directly linked, so the requested on-demand helper and cold-launch target remain outstanding.
+
+## 2026-10-30 investigation (incomplete)
+
+On the same M1 Max, an already-running SuperWhisper process with unknown model and prior activity showed an 88 MB physical footprint (`footprint`), and `ps` showed 215,712 KiB RSS and 2.2% CPU at approximately 22 seconds of process lifetime. It exited during the attempted `top -l 30 -s 2` collection, so these are neither five-minute idle measurements nor controlled comparisons. Other build and app processes were active. Do not interpret them as a head-to-head result.
+
+| Metric / state | LightTTS main | LightTTS changes | SuperWhisper |
+| --- | --- | --- | --- |
+| Physical footprint, five-minute idle | Not measured | Not measured | Not measured |
+| CPU, power, idle wakeups, five-minute idle | Not measured | Not measured | Not measured |
+| Recording and transcription footprint / CPU / power | Not measured | Not measured | Not measured |
+| Footprint after transcription and idle timeout | Not measured | Not measured | Not measured |
+| Launch to status item | Not measured in this run | Not measured | Not measured |
+| Hotkey to popup | Not measured | Not measured | Not measured |
+| Stop to paste, same spoken utterance and model class | Not measured | Not measured | Not measured |
+
+The current changes warm the selected model at recording start, release it after a configurable idle interval (`modelIdleTimeoutSeconds`, default 300 seconds, with timer tolerance), and dispose of hidden popup and menu view trees. Whisper GPU use was already enabled on main. This does not establish a performance win: controlled live audio benchmarks, wakeup/energy measurements, VAD, weight mapping and lazy inference framework loading remain outstanding. A detached model load already in progress may finish after cancellation before its memory can be reclaimed.
+
+A separate release-build fixture run used an 8.5-second `say`-generated WAV fed directly to the test capture path with Whisper tiny.en and a two-second timeout. The footprint was 131 MB five seconds into capture and 146 MB at 20 seconds after launch; completion and post-unload were not established before the process was stopped. These observations do not measure live microphone capture, paste latency, or memory reclamation.
+
+A second fixture run on the final release build completed transcription (136,136 samples). At 35 seconds after launch, its footprint was 146 MB and `ps` reported 0.0% CPU and 198,752 KiB RSS. The two-second timeout was configured for this test, but the measurement does not demonstrate a return to the original footprint. The optional Whisper Core ML encoder was absent; the log reported Metal initialization.
