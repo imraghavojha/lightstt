@@ -233,9 +233,12 @@ private struct ConfigurationPageView: View {
                     Spacer(minLength: 8)
                     Button("Change folder") {
                         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
-                        if panel.runModal() == .OK, let url = panel.url { do { try controller.changeHistoryFolder(url) } catch { controller.message = error.localizedDescription; let alert = NSAlert(error: error); alert.runModal() } }
-                    }
+                        if panel.runModal() == .OK, let url = panel.url { do { try controller.changeHistoryFolder(url) } catch { controller.message = error.localizedDescription } }
+                    }.disabled(controller.historyMigration != nil)
+                    if let progress = controller.historyMigration { ProgressView(progress).frame(width: 100); Button("Cancel") { progress.cancel() } }
                 }.frame(minHeight: 46) }
+                if controller.historyMigration != nil { Text("Moving recordings… Recording and deletion are temporarily unavailable.").font(.caption).foregroundStyle(.secondary) }
+                if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
                 advancedHeading("Text input")
                 SettingsCard {
                     ConfigurationApplicationRow(title: "Clipboard content", help: "Choose whether to restore the previous clipboard contents") {

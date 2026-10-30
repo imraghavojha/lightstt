@@ -58,6 +58,7 @@ import Darwin
     private var mouseStart: Date?
     private var mouseOwnsRecording = false
     private var generation = 0
+    @Published var historyMigration: Progress?
     private let historyQueue = DispatchQueue(label: "com.lighttts.history", qos: .utility)
     var historyURL: URL {
         let fixture = CommandLine.arguments.contains("--ui-fixture") || !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
@@ -69,26 +70,57 @@ import Darwin
         let source = historyURL.deletingLastPathComponent().standardizedFileURL
         let destination = destination.standardizedFileURL
         guard source != destination else { return }
-        guard state == "idle" || state == "error" else { throw NSError(domain: "LightTTS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Wait for the current recording to finish before changing folders."]) }
-        let recordings = source.appendingPathComponent("Recordings", isDirectory: true).path + "/"
-        guard !destination.path.hasPrefix(recordings) else { throw NSError(domain: "LightTTS", code: 3, userInfo: [NSLocalizedDescriptionKey: "Choose a folder outside the current Recordings folder."]) }
+        guard historyMigration == nil, state == "idle" || state == "error" else { throw NSError(domain: "LightTTS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Wait for the current recording or folder change to finish."]) }
+        guard !destination.path.hasPrefix(source.appendingPathComponent("Recordings", isDirectory: true).path + "/") else { throw NSError(domain: "LightTTS", code: 3, userInfo: [NSLocalizedDescriptionKey: "Choose a folder outside the current Recordings folder."]) }
         stopHistoryPlayback()
-        try historyQueue.sync {
+        let progress = Progress(totalUnitCount: 0)
+        progress.isCancellable = true
+        historyMigration = progress
+        historyQueue.async { [weak self] in
             let fm = FileManager.default
             let names = ["history.json", "Recordings"]
-            for name in names where fm.fileExists(atPath: destination.appendingPathComponent(name).path) {
-                throw NSError(domain: "LightTTS", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected folder already contains \(name). Choose an empty folder."])
-            }
-            var copied: [URL] = []
-            do {
-                for name in names {
-                    let from = source.appendingPathComponent(name), to = destination.appendingPathComponent(name)
-                    if fm.fileExists(atPath: from.path) { try fm.copyItem(at: from, to: to); copied.append(to) }
+            var created: [URL] = []
+            let result: Result<Void, Error> = Result {
+                for name in names where fm.fileExists(atPath: destination.appendingPathComponent(name).path) {
+                    throw NSError(domain: "LightTTS", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected folder already contains \(name). Choose an empty folder."])
                 }
-            } catch { for url in copied { try? fm.removeItem(at: url) }; throw error }
-            UserDefaults.standard.set(destination.path, forKey: "historyFolder")
+                do {
+                    var items: [(URL, URL, Bool)] = []
+                    for name in names {
+                        let from = source.appendingPathComponent(name), to = destination.appendingPathComponent(name)
+                        var directory: ObjCBool = false
+                        guard fm.fileExists(atPath: from.path, isDirectory: &directory) else { continue }
+                        items.append((from, to, directory.boolValue))
+                        var enumerationError: Error?
+                        if directory.boolValue, let enumerator = fm.enumerator(at: from, includingPropertiesForKeys: [.isDirectoryKey], options: [], errorHandler: { _, error in enumerationError = error; return false }) {
+                            for case let url as URL in enumerator {
+                                let relative = String(url.path.dropFirst(from.path.count + 1))
+                                let isDirectory = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+                                items.append((url, to.appendingPathComponent(relative), isDirectory))
+                            }
+                            if let error = enumerationError { throw error }
+                        } else if directory.boolValue { throw CocoaError(.fileReadUnknown) }
+                    }
+                    progress.totalUnitCount = Int64(max(items.count, 1))
+                    for (from, to, directory) in items {
+                        if progress.isCancelled { throw CancellationError() }
+                        if to.deletingLastPathComponent() == destination { created.append(to) }
+                        if directory { try fm.createDirectory(at: to, withIntermediateDirectories: false) }
+                        else { try fm.copyItem(at: from, to: to) }
+                        progress.completedUnitCount += 1
+                    }
+                    if progress.isCancelled { throw CancellationError() }
+                } catch { for url in created { try? fm.removeItem(at: url) }; throw error }
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch result {
+                case .success: UserDefaults.standard.set(destination.path, forKey: "historyFolder"); self.saveHistory()
+                case .failure(let error): if !(error is CancellationError) { self.message = "Could not change folder: " + error.localizedDescription }
+                }
+                self.historyMigration = nil
+            }
         }
-        saveHistory()
     }
     func refreshModelIdleTimeout() { if state == "idle" || state == "error" { scheduleEngineUnload() } }
     override init() {
@@ -227,7 +259,7 @@ import Darwin
         }
     }
     func start() {
-        guard state == "idle" else { return }
+        guard state == "idle", historyMigration == nil else { return }
         unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         state = "starting"
@@ -420,7 +452,7 @@ import Darwin
             else { p.alphaValue = 1 } }
     }
 
-    func pruneHistory() { let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; deleteRecordings(removed); history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
+    func pruneHistory() { guard historyMigration == nil else { return }; let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; deleteRecordings(removed); history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
     func refreshLoginStatus() { loginEnabled = SMAppService.mainApp.status == .enabled }
     func setLoginEnabled(_ enabled: Bool) {
         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
@@ -465,7 +497,7 @@ import Darwin
         } catch { message = error.localizedDescription }
     }
     func revealHistory(_ item: HistoryEntry) { NSWorkspace.shared.activateFileViewerSelecting([historyAudioURL(item) ?? historyURL]) }
-    func deleteHistory(_ id: UUID) { if playingHistoryID == id { stopHistoryPlayback() }; if let item = history.first(where: { $0.id == id }) { deleteRecordings([item]) }; history.removeAll { $0.id == id }; saveHistory() }
+    func deleteHistory(_ id: UUID) { guard historyMigration == nil else { return }; if playingHistoryID == id { stopHistoryPlayback() }; if let item = history.first(where: { $0.id == id }) { deleteRecordings([item]) }; history.removeAll { $0.id == id }; saveHistory() }
     private func deleteRecordings(_ entries: [HistoryEntry]) {
         let directory = historyURL.deletingLastPathComponent().appendingPathComponent("Recordings", isDirectory: true)
         let names = entries.compactMap { item -> String? in
