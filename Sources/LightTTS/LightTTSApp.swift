@@ -22,19 +22,8 @@ import Foundation
         #endif
         if isUITest || CommandLine.arguments.contains("--models-window") { hotkeyReady = true; writeReadyMarker(); return }
         hotkeyReady = controller.installHotkey(); LaunchTrace.mark(hotkeyReady ? "hotkey-installed" : "hotkey-unavailable"); writeReadyMarker()
-        if !UserDefaults.standard.bool(forKey: "permissionsOnboardingRequested") {
-            UserDefaults.standard.set(true, forKey: "permissionsOnboardingRequested")
-            if !AXIsProcessTrusted() { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
-            if !CGPreflightListenEventAccess() { _ = CGRequestListenEventAccess() }
-            #if DEBUG
-            let testAudio = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil || ProcessInfo.processInfo.environment["LIGHTTTS_TEST_WAV"] != nil
-            #else
-            let testAudio = false
-            #endif
-            if !testAudio && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined { Task { _ = await AVCaptureDevice.requestAccess(for: .audio) } }
-        }
     }
-    func applicationDidBecomeActive(_ notification: Notification) { if !isUITest && !CommandLine.arguments.contains("--models-window") && AXIsProcessTrusted() && CGPreflightListenEventAccess() { hotkeyReady = controller.installHotkey(); writeReadyMarker() } }
+    func applicationDidBecomeActive(_ notification: Notification) { if !isUITest && !CommandLine.arguments.contains("--models-window") && AXIsProcessTrusted() { hotkeyReady = controller.installHotkey(); writeReadyMarker() } }
     func catalogDidLoad() { catalogReady = true; writeReadyMarker() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { await controller.prepareToQuit(); sender.reply(toApplicationShouldTerminate: true) }
@@ -68,6 +57,7 @@ import Foundation
         if CommandLine.arguments.contains("--light-appearance") { app.appearance = NSAppearance(named: .aqua) }
         if CommandLine.arguments.contains("--dark-appearance") { app.appearance = NSAppearance(named: .darkAqua) }
         if CommandLine.arguments.contains("--models-window") { DispatchQueue.main.async { controller.settingsSelection = "Models"; menu.openSettingsWindow() } }
+        else if !CommandLine.arguments.contains("--ui-fixture") && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] == nil && (!AXIsProcessTrusted() || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized) { DispatchQueue.main.async { controller.settingsSelection = "Configuration"; menu.openSettingsWindow() } }
         withExtendedLifetime((controller, menu, delegate)) { app.run() }
     }
 }

@@ -1,71 +1,88 @@
 import AppKit
 import ApplicationServices
-import AVFoundation
+import Carbon
 
-/// An active session event tap consumes the shortcut before it reaches the focused app.
+extension Notification.Name { static let shortcutsChanged = Notification.Name("LightTTSShortcutsChanged"); static let shortcutCaptureChanged = Notification.Name("LightTTSShortcutCaptureChanged") }
+
+struct Shortcut {
+    let code: Int; let flags: NSEvent.ModifierFlags
+    var modifierOnly: Bool { [54, 55, 56, 60, 58, 61, 59, 62].contains(code) }
+    var carbonFlags: UInt32 { (flags.contains(.command) ? UInt32(cmdKey) : 0) | (flags.contains(.option) ? UInt32(optionKey) : 0) | (flags.contains(.control) ? UInt32(controlKey) : 0) | (flags.contains(.shift) ? UInt32(shiftKey) : 0) }
+    static func load(_ key: String, _ modifiers: String, _ fallback: Int, _ defaultFlags: NSEvent.ModifierFlags) -> Shortcut {
+        let d = SettingsDefaults.store
+        if key == "hotkeyCode" && d.bool(forKey: "rightOption") { return Shortcut(code: 61, flags: []) }
+        return Shortcut(code: d.object(forKey: key) as? Int ?? fallback, flags: NSEvent.ModifierFlags(rawValue: UInt(d.object(forKey: modifiers) as? Int ?? Int(defaultFlags.rawValue))) )
+    }
+    static var toggle: Shortcut { load("hotkeyCode", "hotkeyModifiers", 49, .option) }
+    static var push: Shortcut { load("pushHotkeyCode", "pushHotkeyModifiers", 49, [.option, .shift]) }
+    static var cancel: Shortcut { load("cancelHotkeyCode", "cancelHotkeyModifiers", 53, []) }
+    static func same(_ a: Shortcut, _ b: Shortcut) -> Bool { a.code == b.code && (a.modifierOnly || a.carbonFlags == b.carbonFlags) }
+}
+
 @MainActor final class HotkeyMonitor {
-    private var tap: CFMachPort?
-    private var source: CFRunLoopSource?
-    private var activeKey = false
-    private var rightOption = ModifierKeyState()
-    private var pushActive = false
-    private var mouseActive = false
-    var onShortcut: ((Bool) -> Void)?
-    var onEscape: (() -> Void)?
-    var onPush: ((Bool) -> Void)?
-    var onMouse: ((Bool) -> Void)?
+    private var handler: EventHandlerRef?
+    private var refs: [UInt32: EventHotKeyRef] = [:]
+    private var global: Any?
+    private var local: Any?
+    private var active: Set<UInt32> = []
+    private var recording = false
+    private(set) var registrationFailed = false
+    var onShortcut: ((Bool) -> Void)?; var onEscape: (() -> Void)?; var onPush: ((Bool) -> Void)?; var onMouse: ((Bool) -> Void)?
     func install() -> Bool {
         stop()
-        let accessibility = AXIsProcessTrusted(), input = CGPreflightListenEventAccess()
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS test: accessibility=\(accessibility) input=\(input) microphone=\(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)\n", stderr) }
-        guard accessibility, input else { return false }
-        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.otherMouseDown.rawValue) | (1 << CGEventType.otherMouseUp.rawValue)
-        let callback: CGEventTapCallBack = { _, type, event, info in
-            guard let info else { return Unmanaged.passUnretained(event) }
-            let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(info).takeUnretainedValue()
-            return MainActor.assumeIsolated { monitor.handle(type, event) ? nil : Unmanaged.passUnretained(event) }
+        registrationFailed = false
+        var types = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)), EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
+            guard let event, let context else { return OSStatus(eventNotHandledErr) }
+            var id = EventHotKeyID(); guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &id) == noErr else { return OSStatus(eventNotHandledErr) }
+            let down = GetEventKind(event) == UInt32(kEventHotKeyPressed)
+            MainActor.assumeIsolated { Unmanaged<HotkeyMonitor>.fromOpaque(context).takeUnretainedValue().dispatch(id.id, down) }
+            return noErr
+        }, types.count, &types, Unmanaged.passUnretained(self).toOpaque(), &handler)
+        register(Shortcut.toggle, id: 1)
+        if SettingsDefaults.store.bool(forKey: "pushShortcutEnabled") { register(Shortcut.push, id: 2) }
+        if recording { register(Shortcut.cancel, id: 3) }
+        if AXIsProcessTrusted() {
+            local = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .otherMouseDown, .otherMouseUp]) { [weak self] event in
+                MainActor.assumeIsolated { self?.handle(event) }; return event
+            }
+            global = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .otherMouseDown, .otherMouseUp]) { [weak self] event in
+                Task { @MainActor in self?.handle(event) }
+            }
         }
-        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: CGEventMask(mask), callback: callback, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS test: event tap creation failed\n", stderr) }; return false }
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS test: event tap active\n", stderr) }
-        self.tap = tap
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0); self.source = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
-        return true
+        return AXIsProcessTrusted() && !registrationFailed
     }
-    private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if rightOption.reset() != nil || activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } }; if pushActive { pushActive = false; DispatchQueue.main.async { self.onPush?(false) } }; if mouseActive { mouseActive = false; DispatchQueue.main.async { self.onMouse?(false) } }; if let tap { CGEvent.tapEnable(tap: tap, enable: true) }; return false }
-        if ShortcutButton.isRecording || MouseShortcutButton.isRecording { return false }
-        if type == .otherMouseDown || type == .otherMouseUp {
-            let selected = UserDefaults.standard.object(forKey: "mouseShortcut") as? Int ?? -1
-            guard selected >= 0, event.getIntegerValueField(.mouseEventButtonNumber) == selected else { return false }
-            let down = type == .otherMouseDown
-            if down != mouseActive { mouseActive = down; DispatchQueue.main.async { self.onMouse?(down) } }
-            return true
-        }
-        let code = event.getIntegerValueField(.keyboardEventKeycode)
-        let flags = event.flags.intersection([.maskAlternate, .maskShift, .maskControl, .maskCommand])
-        if type == .keyDown && flags.isEmpty && code == (UserDefaults.standard.object(forKey: "cancelHotkeyCode") as? Int ?? 53) { DispatchQueue.main.async { self.onEscape?() }; return false }
-        if UserDefaults.standard.bool(forKey: "pushShortcutEnabled"), code == (UserDefaults.standard.object(forKey: "pushHotkeyCode") as? Int ?? 49), type == .keyDown || type == .keyUp {
-            let required = CGEventFlags(rawValue: UInt64(UserDefaults.standard.object(forKey: "pushHotkeyModifiers") as? Int ?? Int(NSEvent.ModifierFlags.option.union(.shift).rawValue)))
-            if type == .keyDown && flags == required { if !pushActive { pushActive = true; DispatchQueue.main.async { self.onPush?(true) } }; return true }
-            if type == .keyUp && pushActive { pushActive = false; DispatchQueue.main.async { self.onPush?(false) }; return true }
-        }
-        let right = UserDefaults.standard.bool(forKey: "rightOption")
-        if right {
-            guard type == .flagsChanged && code == 61 else { return false }
-            guard let down = rightOption.update(flags: event.flags.rawValue) else { return false }
-            DispatchQueue.main.async { self.onShortcut?(down) }; return false
-        }
-        let key = UserDefaults.standard.object(forKey: "hotkeyCode") as? Int ?? 49
-        guard code == key, type == .keyDown || type == .keyUp else { return false }
-        let required = CGEventFlags(rawValue: UInt64(UserDefaults.standard.object(forKey: "hotkeyModifiers") as? Int ?? Int(NSEvent.ModifierFlags.option.rawValue)))
-        if type == .keyDown {
-            guard activeKey || flags == required else { return false }
-            if !activeKey { activeKey = true; DispatchQueue.main.async { self.onShortcut?(true) } }
-            return true
-        }
-        guard activeKey else { return false }
-        activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) }; return true
+    private func register(_ shortcut: Shortcut, id: UInt32) {
+        guard !shortcut.modifierOnly else { return }
+        var ref: EventHotKeyRef?
+        if RegisterEventHotKey(UInt32(shortcut.code), shortcut.carbonFlags, EventHotKeyID(signature: 0x4c545453, id: id), GetApplicationEventTarget(), 0, &ref) == noErr, let ref { refs[id] = ref } else { registrationFailed = true }
     }
-    func stop() { if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }; if let tap { CFMachPortInvalidate(tap) }; source = nil; tap = nil; if rightOption.reset() != nil || activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } }; if pushActive { pushActive = false; DispatchQueue.main.async { self.onPush?(false) } }; if mouseActive { mouseActive = false; DispatchQueue.main.async { self.onMouse?(false) } } }
+    func setRecording(_ value: Bool) {
+        guard recording != value else { return }; recording = value
+        if value { register(Shortcut.cancel, id: 3) } else if let ref = refs.removeValue(forKey: 3) { UnregisterEventHotKey(ref) }
+        active.remove(3)
+    }
+    private func dispatch(_ id: UInt32, _ down: Bool) {
+        guard !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return }
+        if down { guard active.insert(id).inserted else { return } } else { guard active.remove(id) != nil else { return } }
+        switch id { case 1: onShortcut?(down); case 2: onPush?(down); case 3: if down && recording { onEscape?() }; case 4: onMouse?(down); default: break }
+    }
+    private func handle(_ event: NSEvent) {
+        if event.type == .otherMouseDown || event.type == .otherMouseUp {
+            guard event.buttonNumber == (SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1) else { return }
+            dispatch(4, event.type == .otherMouseDown); return
+        }
+        let shortcuts: [(UInt32, Shortcut)] = [(1, .toggle)] + (SettingsDefaults.store.bool(forKey: "pushShortcutEnabled") ? [(2, .push)] : []) + (recording ? [(3, .cancel)] : [])
+        let masks: [Int: UInt] = [54: 0x10, 55: 0x08, 56: 0x02, 60: 0x04, 58: 0x20, 61: 0x40, 59: 0x01, 62: 0x2000]
+        for (id, shortcut) in shortcuts where shortcut.modifierOnly && shortcut.code == Int(event.keyCode) {
+            dispatch(id, event.modifierFlags.rawValue & (masks[shortcut.code] ?? 0) != 0)
+        }
+    }
+    func stop() {
+        for ref in refs.values { UnregisterEventHotKey(ref) }; refs.removeAll()
+        if let handler { RemoveEventHandler(handler) }; handler = nil
+        if let global { NSEvent.removeMonitor(global) }; global = nil
+        if let local { NSEvent.removeMonitor(local) }; local = nil
+        if active.contains(1) { onShortcut?(false) }; if active.contains(2) { onPush?(false) }; if active.contains(4) { onMouse?(false) }; active.removeAll()
+    }
 }

@@ -11,7 +11,7 @@ import Darwin
 
 
 @MainActor final class AppController: NSObject, ObservableObject {
-    @Published var state = "idle"
+    @Published var state = "idle" { didSet { hotkey.setRecording(state == "starting" || state == "recording") } }
     @Published var settingsSelection = "Sound"
     private var previousSettingsSelection = "Sound"
     @Published var level: Float = 0
@@ -163,6 +163,8 @@ import Darwin
                 if UserDefaults.standard.bool(forKey: "alwaysShowRecordingWindow") { self.showPanel() } else { self.dismissPanel() }
             }
         }
+        NotificationCenter.default.addObserver(self, selector: #selector(shortcutsChanged), name: .shortcutsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(shortcutCaptureChanged), name: .shortcutCaptureChanged, object: nil)
         if UserDefaults.standard.bool(forKey: "autoCheckUpdates") && !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") { checkUpdates(interactive: false) }
         if let index = CommandLine.arguments.firstIndex(of: "--settings-page"), CommandLine.arguments.indices.contains(index + 1) { settingsSelection = CommandLine.arguments[index + 1] }
         if isTestAudio { DistributedNotificationCenter.default().addObserver(self, selector: #selector(testAudioToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(Bundle.main.bundleIdentifier ?? "app")"), object: nil) }
@@ -171,6 +173,8 @@ import Darwin
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testHIDShortcut(_:)), name: Notification.Name("com.lighttts.test.hid.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
         #endif
     }
+    @objc private func shortcutsChanged() { if !ShortcutButton.isRecording && !MouseShortcutButton.isRecording { installHotkey() } }
+    @objc private func shortcutCaptureChanged() { if ShortcutButton.isRecording || MouseShortcutButton.isRecording { hotkey.stop() } else { installHotkey() } }
     @objc private func testAudioToggle(_ notification: Notification) { if state == "recording" { stop() } else if state == "idle" { start() } }
     #if DEBUG
     func testURLToggle() { handleShortcut(true); handleShortcut(false) }
@@ -217,18 +221,19 @@ import Darwin
         engine = nil; loadedID = ""
     }
     @discardableResult func installHotkey() -> Bool {
-        guard !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") else { return false }
+        guard !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") && !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return false }
         hotkey.onShortcut = { [weak self] down in self?.handleShortcut(down) }
         hotkey.onPush = { [weak self] down in self?.handlePush(down) }
         hotkey.onMouse = { [weak self] down in self?.handleMouse(down) }
         hotkey.onEscape = { [weak self] in if self?.state != "idle" { self?.cancel() } }
         let installed = hotkey.install()
-        if !installed { message = "Enable Accessibility and Input Monitoring in System Settings, then retry the shortcut." }
+        if !AXIsProcessTrusted() { message = "Enable Accessibility in System Settings → Privacy & Security → Accessibility, then retry the shortcut." }
+        else if hotkey.registrationFailed { message = "A shortcut is unavailable. Choose another in Configuration → Keyboard Shortcuts." }
+        else if message.contains("shortcut") || message.contains("Accessibility") { message = "" }
         return installed
     }
     func requestPermissions() {
         _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
-        _ = CGRequestListenEventAccess()
         installHotkey()
     }
     func handleShortcut(_ down: Bool) {
@@ -268,6 +273,7 @@ import Darwin
     }
     func start() {
         guard state == "idle", historyMigration == nil else { return }
+        if !isTestAudio && !AXIsProcessTrusted() { fail("Enable Accessibility in System Settings → Privacy & Security → Accessibility, then try again."); return }
         unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         state = "starting"
