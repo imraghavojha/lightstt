@@ -30,7 +30,11 @@ extension SoundPageView {
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 10))
                             .foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(
                                 false)
-                    }.help("Pause works with apps that appear in Now Playing, such as Music, Spotify, browsers, and Podcasts. Mute and Lower reduce output volume while recording.")
+                    }
+                    .help(
+                        "Pause works with apps that appear in Now Playing, such as Music, Spotify, "
+                            + "browsers, and Podcasts. Mute and Lower reduce output volume while recording."
+                    )
             }
             PageRule()
             HStack {
