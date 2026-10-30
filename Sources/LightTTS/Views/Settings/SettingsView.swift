@@ -34,7 +34,7 @@ struct SettingsView: View {
             }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(maxHeight: .infinity).background(Color(nsColor: dark ? NSColor(srgbRed: 57/255, green: 62/255, blue: 71/255, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
             VStack(spacing: 0) {
-                if controller.settingsSelection != "Library" {
+                if controller.settingsSelection != "Library" && !(controller.settingsSelection == "Configuration" && controller.showAdvanced) {
                     HStack {
                         Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer()
                         Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).offset(x: 6).help("Select microphone")
@@ -173,7 +173,7 @@ private struct ConfigurationPageView: View {
                 ConfigurationApplicationRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; PageRule()
                 ConfigurationApplicationRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: Binding(get: { controller.loginEnabled }, set: { controller.setLoginEnabled($0) })).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")) }; PageRule()
                 ConfigurationApplicationRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Error logging")).help("Write errors to a local log") }; PageRule()
-                ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { Menu { ForEach([(0, "Forever"), (1, "1 day"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (180, "6 months"), (365, "1 year")], id: \.0) { days, label in Button(label) { retentionBinding.wrappedValue = days } } } label: { HStack { Text(retentionLabel); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }.padding(.horizontal, 9).frame(width: 125, height: 28).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 0.5)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize() }
+                ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { SettingsPopup(selection: retentionBinding, options: [(0, "Forever"), (1, "1 day"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (180, "6 months"), (365, "1 year")], width: 125).frame(width: 125, height: 28) }
             }
             SettingsCard { Button { controller.showAdvanced.toggle() } label: { HStack { Text("Advanced settings"); Spacer(); Image(systemName: controller.showAdvanced ? "chevron.down" : "chevron.right").foregroundStyle(.secondary) }.frame(height: 48).contentShape(Rectangle()) }.buttonStyle(.plain) }.padding(.top, 18)
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
@@ -184,7 +184,7 @@ private struct ConfigurationPageView: View {
             HStack(spacing: 10) {
                 Button { controller.showAdvanced = false } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).help("Back to Configuration")
                 Text("Advanced settings").font(.system(size: 13, weight: .bold)); Spacer()
-            }.padding(.horizontal, 24).padding(.bottom, 8)
+            }.padding(.horizontal, 12).frame(height: 48)
             ScrollView { VStack(alignment: .leading, spacing: 0) {
                 advancedHeading("Application")
                 SettingsCard {
@@ -203,11 +203,13 @@ private struct ConfigurationPageView: View {
                 SettingsCard { ConfigurationApplicationRow(title: "App folder location") { Text("Managed by LightTTS").foregroundStyle(.secondary) } }
                 advancedHeading("Text input")
                 SettingsCard {
-                    unavailableRow("Clipboard content"); PageRule()
+                    ConfigurationApplicationRow(title: "Clipboard content", help: "Choose whether to restore the previous clipboard contents") {
+                        SettingsPopup(selection: Binding(get: { restoreClipboard ? 1 : 0 }, set: { restoreClipboard = $0 == 1 }), options: ["Keep result", "Restore previous"], width: 145).frame(width: 145, height: 28)
+                    }; PageRule()
                     unavailableRow("Clipboard history"); PageRule()
                     ConfigurationApplicationRow(title: "Paste result text", help: "Paste the transcription into the focused app") { Toggle("", isOn: $pasteResult).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Paste result text")) }; PageRule()
-                    unavailableRow("Hold shift to auto-send after paste"); PageRule()
-                    unavailableRow("Simulate keypresses")
+                    ConfigurationApplicationRow(title: "Hold shift to auto-send after paste", help: "Send Return when Shift is held") { Toggle("", isOn: $sendOnShift).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Hold shift to auto-send after paste")) }; PageRule()
+                    ConfigurationApplicationRow(title: "Simulate keypresses", help: "Type the result instead of pasting it") { Toggle("", isOn: $simulateTyping).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Simulate keypresses")) }
                 }
             }.padding(.horizontal, 24).padding(.bottom, 24) }.font(.system(size: 13))
         }
@@ -288,4 +290,37 @@ private struct ConfigurationApplicationRow<Content: View>: View {
 
 private struct PageRule: View {
     var body: some View { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5) }
+}
+
+/// Native popup chrome keeps the indicator and enclosing surface together.
+private struct SettingsPopup: NSViewRepresentable {
+    @Binding var selection: Int
+    let options: [(Int, String)]
+    let width: CGFloat
+    init(selection: Binding<Int>, options: [(Int, String)], width: CGFloat) {
+        self._selection = selection; self.options = options; self.width = width
+    }
+    init(selection: Binding<Int>, options: [String], width: CGFloat) {
+        self.init(selection: selection, options: Array(options.enumerated()).map { ($0.offset, $0.element) }, width: width)
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.controlSize = .regular
+        button.target = context.coordinator; button.action = #selector(Coordinator.changed(_:))
+        return button
+    }
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.parent = self
+        if button.itemTitles != options.map(\.1) { button.removeAllItems(); button.addItems(withTitles: options.map(\.1)) }
+        if let index = options.firstIndex(where: { $0.0 == selection }) { button.selectItem(at: index) }
+    }
+    final class Coordinator: NSObject {
+        var parent: SettingsPopup
+        init(_ parent: SettingsPopup) { self.parent = parent }
+        @objc func changed(_ sender: NSPopUpButton) {
+            guard parent.options.indices.contains(sender.indexOfSelectedItem) else { return }
+            parent.selection = parent.options[sender.indexOfSelectedItem].0
+        }
+    }
 }
