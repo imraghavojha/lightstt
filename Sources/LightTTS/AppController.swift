@@ -11,7 +11,7 @@ import LightTTSCore
     @Published var started = Date()
     @Published var message = ""
     @Published var history: [HistoryEntry] = []
-    @Published var models = (try? ModelCatalog.load()) ?? []
+    @Published var models: [Model] = []
     @Published var busyModel: String?
     @Published var downloadProgress: Double = 0
     private var downloadTask: Task<Void, Never>?
@@ -24,21 +24,31 @@ import LightTTSCore
     private var panel: NSPanel?
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
-    private var focus: AXUIElement?
+    private var focus: FocusTarget?
+    private var testAudio: [Float]?
     private var pressed = false
     private var generation = 0
     private let historyURL = ModelStore.directory.deletingLastPathComponent().appendingPathComponent("history.json")
     override init() {
         super.init()
-        if let data = UserDefaults.standard.data(forKey: "customModels"), let custom = try? JSONDecoder().decode([Model].self, from: data) { models.append(contentsOf: custom) }
-        if let data = try? Data(contentsOf: historyURL), let items = try? JSONDecoder().decode([HistoryEntry].self, from: data) { history = items }
+        let historyURL = self.historyURL
+        Task {
+            let data = await Task.detached(priority: .utility) { () -> ([Model], [HistoryEntry]) in
+                let catalog = (try? ModelCatalog.load()) ?? []
+                let custom = UserDefaults.standard.data(forKey: "customModels").flatMap { try? JSONDecoder().decode([Model].self, from: $0) } ?? []
+                let history = (try? Data(contentsOf: historyURL)).flatMap { try? JSONDecoder().decode([HistoryEntry].self, from: $0) } ?? []
+                return (catalog + custom, Array(history.prefix(500)))
+            }.value
+            self.models = data.0; self.history = data.1
+        }
         #if DEBUG
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testToggle(_:)), name: Notification.Name("com.lighttts.test.toggle.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(testHIDShortcut(_:)), name: Notification.Name("com.lighttts.test.hid.\(ProcessInfo.processInfo.processIdentifier)"), object: nil)
         #endif
     }
     #if DEBUG
-    @objc private func testToggle(_ notification: Notification) { handleShortcut(true); handleShortcut(false) }
+    func testURLToggle() { handleShortcut(true); handleShortcut(false) }
+    @objc private func testToggle(_ notification: Notification) { testURLToggle() }
     @objc private func testHIDShortcut(_ notification: Notification) {
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
@@ -87,18 +97,19 @@ import LightTTSCore
         guard state == "idle" else { return }
         generation += 1; let current = generation
         state = "starting"
-        let system = AXUIElementCreateSystemWide(); var focused: CFTypeRef?
         focus = nil
-        if AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let focused { focus = (focused as! AXUIElement) }
-        if focus == nil, let app = NSWorkspace.shared.frontmostApplication {
-            var value: CFTypeRef?
-            if AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute as CFString, &value) == .success, let value { focus = (value as! AXUIElement) }
-        }
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { var pid: pid_t = 0; if let focus { AXUIElementGetPid(focus, &pid) }; fputs("LightTTS test: captured focus pid=\(pid), front=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)\n", stderr) }
-        #endif
-        guard focus != nil else { fail("Focus a text field and check Accessibility access before recording."); return }
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         Task {
+            let target = await Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }.value
+            guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
+            guard let target else { fail("Focus a text field and check Accessibility access before recording."); return }
+            focus = target
+            #if DEBUG
+            if let path = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? ProcessInfo.processInfo.environment["LIGHTTTS_TEST_WAV"] {
+                do { testAudio = try AudioFileReader.read(URL(fileURLWithPath: path)); started = Date(); state = "recording"; showPanel() } catch { fail(error.localizedDescription) }
+                return
+            }
+            #endif
             let allowed = await AVCaptureDevice.requestAccess(for: .audio)
             guard current == generation, state == "starting", !UserDefaults.standard.bool(forKey: "pushToTalk") || pressed else { return }
             guard allowed else { fail("Microphone access is required. Enable it in System Settings."); return }
@@ -109,16 +120,9 @@ import LightTTSCore
         }
     }
     func stop() {
-        guard state == "recording", let audio else { return }
-        let recorded = audio.stop(); self.audio = nil; state = "processing"; let current = generation
-        let samples: [Float]
-        #if DEBUG
-        if let path = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_WAV"] {
-            do { samples = try AudioFileReader.read(URL(fileURLWithPath: path)) } catch { fail(error.localizedDescription); return }
-        } else { samples = recorded }
-        #else
-        samples = recorded
-        #endif
+        guard state == "recording" else { return }
+        let samples = testAudio ?? audio?.stop() ?? []
+        testAudio = nil; audio = nil; state = "processing"; let current = generation
         processing = Task {
             do {
                 let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-tiny.en"
@@ -141,12 +145,15 @@ import LightTTSCore
                 guard current == generation else { return }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
                 guard AXIsProcessTrusted() else { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary); throw SpeechError.audio("Allow Accessibility access in System Settings to paste text.") }
-                try insert(text); history.insert(HistoryEntry(text: text, date: Date()), at: 0); saveHistory(); state = "done"
+                guard let target = focus else { throw SpeechError.audio("The focused field is unavailable.") }
+                try await Task.detached(priority: .userInitiated) { try target.insert(text) }.value
+                try Task.checkCancellation(); guard current == generation else { return }
+                history.insert(HistoryEntry(text: text, date: Date()), at: 0); if history.count > 500 { history.removeLast(history.count - 500) }; saveHistory(); state = "done"
                 try? await Task.sleep(nanoseconds: 1_000_000_000); if current == generation { hide() }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
     }
-    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; hide() }
+    func cancel() { generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; hide() }
     private func hide() { panel?.orderOut(nil); state = "idle"; level = 0 }
     private func fail(_ text: String) { message = text; state = "error"; showPanel() }
     private func showPanel() {
@@ -156,15 +163,6 @@ import LightTTSCore
             p.contentView = NSHostingView(rootView: RecordingView(controller: self)); panel = p
         }
         if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70)); p.orderFrontRegardless() }
-    }
-    private func insert(_ text: String) throws {
-        let result = focus.map { AXUIElementSetAttributeValue($0, kAXSelectedTextAttribute as CFString, text as CFTypeRef) } ?? .failure
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { var pid: pid_t = 0; if let focus { AXUIElementGetPid(focus, &pid) }; fputs("LightTTS test: insert pid=\(pid) result=\(result.rawValue) text=\(text)\n", stderr) }
-        #endif
-        guard result == .success else {
-            throw SpeechError.audio("Could not insert into the focused field. The transcription was not pasted.")
-        }
     }
     private func saveHistory() { try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true); if let data = try? JSONEncoder().encode(history) { try? data.write(to: historyURL, options: .atomic) } }
     func importLocalModel() {
@@ -195,6 +193,7 @@ import LightTTSCore
         } catch { message = error.localizedDescription }
     }
     func cancelDownload() { downloadTask?.cancel() }
+    func prepareToQuit() async { let task = downloadTask; task?.cancel(); await task?.value }
     func download(_ model: Model) {
         guard busyModel == nil else { return }
         busyModel = model.id; downloadProgress = 0

@@ -27,7 +27,7 @@ import ApplicationServices
         return true
     }
     private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if let tap { CGEvent.tapEnable(tap: tap, enable: true) }; return false }
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if activeKey { activeKey = false; DispatchQueue.main.async { self.onShortcut?(false) } }; if let tap { CGEvent.tapEnable(tap: tap, enable: true) }; return false }
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         if type == .keyDown && code == 53 { DispatchQueue.main.async { self.onEscape?() }; return false }
         let right = UserDefaults.standard.bool(forKey: "rightOption")
