@@ -212,6 +212,7 @@ import LightTTSCore
             if !p.isVisible { p.alphaValue = 0; p.orderFrontRegardless(); NSAnimationContext.runAnimationGroup { context in context.duration = 0.15; p.animator().alphaValue = 1 } }
             else { p.alphaValue = 1 } }
     }
+    func deleteHistory(_ id: UUID) { history.removeAll { $0.id == id }; saveHistory() }
     private func saveHistory() { try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true); if let data = try? JSONEncoder().encode(history) { try? data.write(to: historyURL, options: .atomic) } }
     func importLocalModel() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.data]; panel.allowsMultipleSelection = false
