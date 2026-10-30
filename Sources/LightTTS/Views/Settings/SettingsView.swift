@@ -229,10 +229,10 @@ private struct ConfigurationPageView: View {
                     ConfigurationApplicationRow(title: "Hold shift to auto-send after paste", help: "Send Return when Shift is held") { Toggle("", isOn: $sendOnShift).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Hold shift to auto-send after paste")) }; PageRule()
                     ConfigurationApplicationRow(title: "Simulate keypresses", help: "Type the result instead of pasting it") { Toggle("", isOn: $simulateTyping).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Simulate keypresses")) }
                 }
-            }.padding(.horizontal, 24).padding(.bottom, 24) }.font(.system(size: 13))
+            }.padding(.horizontal, 24).padding(.bottom, 24).environment(\.advancedSettingsRows, true) }.font(.system(size: 13))
         }
     }
-    private func advancedHeading(_ title: String) -> some View { Text(title).font(.system(size: 13, weight: .semibold)).padding(.top, 14).padding(.bottom, 9) }
+    private func advancedHeading(_ title: String) -> some View { Text(title).font(.system(size: 13, weight: .semibold)).padding(.top, title == "Application" ? 14 : 22).padding(.bottom, 9) }
     private func unavailableRow(_ title: String) -> some View {
         ConfigurationApplicationRow(title: title, help: "Not available in LightTTS") { Toggle("", isOn: .constant(false)).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: title)).disabled(true) }
     }
@@ -302,11 +302,20 @@ private struct ThemeArtwork: View {
     }
 }
 
+private struct AdvancedSettingsRowsKey: EnvironmentKey { static let defaultValue = false }
+private extension EnvironmentValues {
+    var advancedSettingsRows: Bool {
+        get { self[AdvancedSettingsRowsKey.self] }
+        set { self[AdvancedSettingsRowsKey.self] = newValue }
+    }
+}
+
 private struct ConfigurationApplicationRow<Content: View>: View {
+    @Environment(\.advancedSettingsRows) private var advanced
     let title: String
     var help: String? = nil
     @ViewBuilder var content: Content
-    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "questionmark.circle").foregroundStyle(.secondary).help(help) }; Spacer(); content }.frame(minHeight: title == "Keep recordings for" ? 58 : 43) }
+    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "questionmark.circle").foregroundStyle(.secondary).help(help) }; Spacer(); content }.frame(minHeight: title == "Keep recordings for" ? 58 : (advanced ? 46 : 43)) }
 }
 
 private struct PageRule: View {
