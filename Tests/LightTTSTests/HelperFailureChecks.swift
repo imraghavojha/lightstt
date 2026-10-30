@@ -126,6 +126,16 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         precondition(controller.state == "recording", "next shortcut should start capture")
         controller.cancel()
         precondition(controller.state == "idle" && !controller.recordingPanelVisible, "cancel must hide the panel")
+        UserDefaults.standard.set("Mini", forKey: "recordingWindow")
+        for sessionState in ["processing", "loading"] {
+            controller.showPreviewState(sessionState)
+            precondition(controller.recordingPanelVisible)
+            controller.handleShortcut(true)
+            precondition(controller.state == "idle" && !controller.recordingPanelVisible, "toggle must cancel \(sessionState)")
+            controller.showPreviewState(sessionState)
+            controller.cancel()
+            precondition(controller.state == "idle" && !controller.recordingPanelVisible, "cancel must dismiss \(sessionState)")
+        }
         controller.fail("Test failure")
         precondition(controller.state == "error" && controller.recordingPanelVisible && controller.recordingPanelTransparent)
         try await Task.sleep(nanoseconds: 4_300_000_000)

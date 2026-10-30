@@ -16,8 +16,8 @@ struct RecordingView: View {
             return ceil(textWidth) + 48
         case "loading":
             let textWidth = ("Loading model…" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold)]).width
-            return ceil(textWidth) + 28
-        default: return controller.state == "idle" ? 45 : 60
+            return ceil(textWidth) + 50
+        default: return controller.state == "idle" ? 45 : (controller.state == "processing" ? 76 : 60)
         }
     }
 
@@ -51,6 +51,11 @@ struct RecordingView: View {
                 Button(action: { controller.cancel() }) {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
                 }.buttonStyle(.plain).help("Dismiss")
+            }
+            if controller.state == "processing" || controller.state == "loading" {
+                Button(action: { controller.cancel() }) {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.8)).frame(width: 22, height: 24)
+                }.buttonStyle(.plain).help("Cancel transcription").accessibilityLabel("Cancel transcription")
             }
         }
         .contentShape(Capsule())
