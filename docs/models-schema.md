@@ -15,7 +15,7 @@ For non-Whisper multi-file models hosted outside Hugging Face, an HTTP(S) URL ma
 ## Free cloud models (verified 2026-10-30)
 
 - **Groq Whisper large-v3 and large-v3-turbo:** [free-tier rate limits](https://console.groq.com/docs/rate-limits) list both models; [billing FAQ](https://console.groq.com/docs/billing-faqs) requires a payment method for upgrading from Free, not for remaining on it.
-- **Gemini 2.5 Flash:** [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) lists free input/output and audio support; [billing](https://ai.google.dev/gemini-api/docs/billing) says new accounts start on Free and billing is linked for Paid. Availability and free-tier eligibility vary by account and region.
+- **Gemini 3.8 Flash:** [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) lists free input/output and audio support; [billing](https://ai.google.dev/gemini-api/docs/billing) says new accounts start on Free and billing is linked for Paid. Availability and free-tier eligibility vary by account and region. Gemini 2.5 Flash remains available as a legacy choice for projects with prior access; Google restricts it for new projects.
 - **ElevenLabs Scribe v2:** [pricing](https://elevenlabs.io/pricing) lists 10,000 monthly Free credits and speech-to-text credit consumption, while [ElevenLabs' STT API page](https://join.elevenlabs.io/api/speech-to-text) says no credit card is required to begin. Quotas are shared with other ElevenLabs products.
 - **OpenAI-compatible endpoint:** user-supplied; cost and availability depend on the endpoint. It is not represented as a free hosted service.
 

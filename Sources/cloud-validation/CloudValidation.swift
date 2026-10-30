@@ -18,7 +18,7 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         let expectedKey = "unit-test-key"
         let payload: String
         if url.host == "generativelanguage.googleapis.com" {
-            guard request.value(forHTTPHeaderField: "x-goog-api-key") == expectedKey, let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any], let contents = obj["contents"] as? [[String: Any]], let parts = contents.first?["parts"] as? [[String: Any]], let audio = parts.last?["inline_data"] as? [String: Any], let encoded = audio["data"] as? String, let bytes = Data(base64Encoded: encoded), bytes.range(of: Data("ftyp".utf8)) != nil else { fputs("Mock request validation failed\n", stderr); client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse)); return }
+            guard url.path == "/v1beta/models/gemini-3.8-flash:generateContent", request.value(forHTTPHeaderField: "x-goog-api-key") == expectedKey, let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any], let contents = obj["contents"] as? [[String: Any]], let parts = contents.first?["parts"] as? [[String: Any]], let audio = parts.last?["inline_data"] as? [String: Any], let encoded = audio["data"] as? String, let bytes = Data(base64Encoded: encoded), bytes.range(of: Data("ftyp".utf8)) != nil else { fputs("Mock request validation failed\n", stderr); client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse)); return }
             payload = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]}}]}"
         } else {
             let field = url.host == "api.elevenlabs.io" ? "xi-api-key" : "Authorization"

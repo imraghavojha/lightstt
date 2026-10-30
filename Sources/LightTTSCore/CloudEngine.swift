@@ -6,7 +6,7 @@ import Security
 public enum CloudProvider: String, Codable, CaseIterable, Sendable {
     case groq, gemini, elevenlabs, compatible
     public var title: String { switch self { case .groq: return "Groq"; case .gemini: return "Google Gemini"; case .elevenlabs: return "ElevenLabs"; case .compatible: return "OpenAI-compatible" } }
-    public var models: [String] { switch self { case .groq: return ["whisper-large-v3", "whisper-large-v3-turbo"]; case .gemini: return ["gemini-2.5-flash"]; case .elevenlabs: return ["scribe_v2"]; case .compatible: return [] } }
+    public var models: [String] { switch self { case .groq: return ["whisper-large-v3", "whisper-large-v3-turbo"]; case .gemini: return ["gemini-3.8-flash", "gemini-2.5-flash"]; case .elevenlabs: return ["scribe_v2"]; case .compatible: return [] } }
     public var environmentKey: String { switch self { case .groq: return "GROQ_API_KEY"; case .gemini: return "GEMINI_API_KEY"; case .elevenlabs: return "ELEVENLABS_API_KEY"; case .compatible: return "OPENAI_COMPATIBLE_API_KEY" } }
 }
 
