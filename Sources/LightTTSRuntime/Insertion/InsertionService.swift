@@ -21,7 +21,8 @@ public final class InsertionService: InsertionServicing {
     }
 
     public func captureAtStop() -> FocusTicket {
-        focus.captureAtStop()
+        let ticket = focus.captureAtStop()
+        return FocusTicket(shiftHeldAtStop: shiftHeld()) { await ticket.result() }
     }
 
     public func deliver(
@@ -47,7 +48,7 @@ public final class InsertionService: InsertionServicing {
         } else if case .unavailable = result.disposition {
             copied = true
         } else if let target = result.target {
-            let send = settings.sendOnShift && shiftHeld()
+            let send = settings.sendOnShift && focus.shiftHeldAtStop
             do {
                 let started = try await Task.detached(priority: .userInitiated) {
                     guard await isCurrent() else { return false }
@@ -55,12 +56,18 @@ public final class InsertionService: InsertionServicing {
                         text,
                         restoreClipboard: shouldRestoreClipboard(
                             disposition: result.disposition, preference: settings.restoreClipboard),
-                        allowClipboardHistory: settings.allowClipboardHistory)
-                    if send { try target.sendReturn() }
+                        allowClipboardHistory: settings.allowClipboardHistory,
+                        isCurrent: { DispatchQueue.main.sync { isCurrent() } })
+                    if send {
+                        try target.sendReturn(isCurrent: { DispatchQueue.main.sync { isCurrent() } }
+                        )
+                    }
                     return true
                 }.value
                 guard started else { return InsertionOutcome(delivery: .skipped) }
-            } catch FocusError.secure {
+            } catch FocusError.cancelled {
+                return InsertionOutcome(delivery: .skipped)
+            } catch FocusError.secure, FocusError.changed, FocusError.clipboardChanged {
                 copied = true
             } catch {
                 warning =

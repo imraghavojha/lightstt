@@ -351,7 +351,8 @@ import IOKit.ps
         let frontApp = NSWorkspace.shared.frontmostApplication
         let frontPID = frontApp?.processIdentifier
         if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE stop front bundle=%@ pid=%d", frontApp?.bundleIdentifier ?? "nil", frontPID ?? -1) }
-        let stopFocusTask = Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID) }
+        let stopShiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
+        let stopFocusTask = Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID, shiftHeld: stopShiftHeld) }
         LaunchTrace.mark("recording-stopped")
         let rawSamples = testAudio ?? audio?.stop() ?? []
         LaunchTrace.mark("capture-stopped")
@@ -431,18 +432,21 @@ import IOKit.ps
                         let restore = shouldRestoreClipboard(disposition: target.stopDisposition, preference: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true)
                         let history = UserDefaults.standard.object(forKey: "clipboardHistory") as? Bool ?? true
                         let send = UserDefaults.standard.bool(forKey: "sendOnShift")
-                        let shiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
+                        let shiftHeld = target.shiftHeldAtStop
                         do {
                             LaunchTrace.mark("paste-start")
                             try await Task.detached(priority: .userInitiated) {
-                                try target.paste(text, restoreClipboard: restore, allowClipboardHistory: history)
-                                if send && shiftHeld { try target.sendReturn() }
+                                let isCurrent = { DispatchQueue.main.sync { current == self.generation && self.processing?.isCancelled != true } }
+                                try target.paste(text, restoreClipboard: restore, allowClipboardHistory: history, isCurrent: isCurrent)
+                                if send && shiftHeld { try target.sendReturn(isCurrent: isCurrent) }
                             }.value
                             LaunchTrace.mark("paste-end")
-                        } catch FocusError.secure { copied = true }
+                        } catch FocusError.cancelled { return }
+                        catch FocusError.secure, FocusError.changed, FocusError.clipboardChanged { copied = true }
                         catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
                     } else { copied = true }
                 }
+                try Task.checkCancellation(); guard current == generation else { return }
                 if copied || pasteWarning != nil {
                     writeTranscriptToClipboard(text)
                 }

@@ -1,8 +1,10 @@
 import Foundation
 
 public protocol TextTarget: AnyObject, Sendable {
-    func paste(_ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool) throws
-    func sendReturn() throws
+    func paste(
+        _ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool, isCurrent: () -> Bool)
+        throws
+    func sendReturn(isCurrent: () -> Bool) throws
 }
 
 public struct FocusResult: Sendable {
@@ -18,7 +20,11 @@ public struct FocusResult: Sendable {
 @MainActor
 public struct FocusTicket {
     private let resolve: @MainActor () async -> FocusResult
-    public init(resolve: @escaping @MainActor () async -> FocusResult) {
+    public let shiftHeldAtStop: Bool
+    public init(
+        shiftHeldAtStop: Bool = false, resolve: @escaping @MainActor () async -> FocusResult
+    ) {
+        self.shiftHeldAtStop = shiftHeldAtStop
         self.resolve = resolve
     }
     public func result() async -> FocusResult {

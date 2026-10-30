@@ -8,11 +8,13 @@ private final class FakeTarget: TextTarget, @unchecked Sendable {
     var error: FocusError?
     var ranOnMainThread: Bool?
     var restores: [Bool] = []
-    func paste(_ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool) throws {
+    func paste(
+        _ text: String, restoreClipboard: Bool, allowClipboardHistory: Bool, isCurrent: () -> Bool
+    ) throws {
         restores.append(restoreClipboard)
         try record("paste: \(text)")
     }
-    func sendReturn() throws { try record("return") }
+    func sendReturn(isCurrent: () -> Bool) throws { try record("return") }
     private func record(_ call: String) throws {
         ranOnMainThread = Thread.isMainThread
         calls.append(call)
@@ -111,10 +113,7 @@ final class InsertionServiceTests: XCTestCase {
             "hello", to: changed.captureAtStop(), autoPaste: true
         ) { true }
         XCTAssertEqual(changedOutcome.delivery, .copied)
-        XCTAssertEqual(
-            changedOutcome.warning,
-            "Could not auto-paste: The focused field or app changed before text could be inserted. The transcription was copied to the clipboard."
-        )
+        XCTAssertNil(changedOutcome.warning)
         XCTAssertEqual(clipboard.writes.count, 2)
     }
 
@@ -267,6 +266,87 @@ final class InsertionServiceTests: XCTestCase {
             ])
         clipboard.write("public", allowClipboardHistory: true)
         XCTAssertEqual(clipboard.recordedTypes[1], [.string])
+    }
+
+    func testNativeNonEditableControlsAndOpaqueEditors() {
+        for role in ["AXButton", "AXList", "AXTable", "AXMenu", "AXStaticText"] {
+            XCTAssertEqual(
+                focusDisposition(role: role, subrole: nil, secureInput: false), .unavailable)
+            XCTAssertEqual(
+                focusDisposition(role: role, subrole: nil, secureInput: false, isOpaqueApp: true),
+                .uncertain)
+        }
+    }
+
+    func testOverlappingRestorationsCarryOriginalAndRespectExternalChange() {
+        let restore = PasteRestoration<String>()
+        let original = restore.original(currentCount: 1) { "original" }
+        restore.published(count: 2, original: original, restore: true)
+        let carried = restore.original(currentCount: 2) { "first transcript" }
+        restore.published(count: 3, original: carried, restore: true)
+        XCTAssertNil(restore.takeForRestore(expectedCount: 2, currentCount: 3))
+        XCTAssertEqual(restore.takeForRestore(expectedCount: 3, currentCount: 3), "original")
+        restore.published(count: 4, original: original, restore: true)
+        XCTAssertNil(restore.takeForRestore(expectedCount: 4, currentCount: 5))
+    }
+
+    func testStopFocusIdentityAndOpaqueFallback() {
+        XCTAssertTrue(
+            focusMatches(
+                capturedElement: 1, currentElement: 1, capturedWindow: 2, currentWindow: 2,
+                equal: ==))
+        XCTAssertFalse(
+            focusMatches(
+                capturedElement: 1, currentElement: 3, capturedWindow: 2, currentWindow: 2,
+                equal: ==))
+        XCTAssertFalse(
+            focusMatches(
+                capturedElement: 1, currentElement: 1, capturedWindow: 2, currentWindow: 3,
+                equal: ==))
+        XCTAssertTrue(
+            focusMatches(
+                capturedElement: nil, currentElement: 1, capturedWindow: 2, currentWindow: 2,
+                equal: ==))
+    }
+
+    func testModifierWaitCancellationAndOwnership() throws {
+        var waits = 0
+        XCTAssertThrowsError(
+            try waitForPasteModifiers(
+                modifiersHeld: { true }, isCurrent: { waits == 0 }, timedOut: { false },
+                pause: { waits += 1 })
+        ) { XCTAssertEqual($0 as? FocusError, .cancelled) }
+        XCTAssertEqual(waits, 1)
+        XCTAssertNoThrow(
+            try waitForPasteModifiers(
+                modifiersHeld: { false }, isCurrent: { true }, timedOut: { true }, pause: {}))
+        XCTAssertThrowsError(
+            try verifyPasteOwnership(expected: 2, current: { 3 }, isCurrent: { true })
+        ) { XCTAssertEqual($0 as? FocusError, .clipboardChanged) }
+        XCTAssertThrowsError(
+            try verifyPasteOwnership(expected: 2, current: { 2 }, isCurrent: { false })
+        ) { XCTAssertEqual($0 as? FocusError, .cancelled) }
+    }
+
+    func testShiftIntentIsCapturedAtStop() async {
+        let target = FakeTarget()
+        let clipboard = FakeClipboard()
+        var shift = true
+        let service = InsertionService(
+            focus: FakeFocus(
+                ticket: FocusTicket { FocusResult(target: target, disposition: .editable) }),
+            clipboard: clipboard,
+            options: {
+                InsertionOptions(
+                    simulateTyping: false, sendOnShift: true, restoreClipboard: true,
+                    allowClipboardHistory: true)
+            },
+            accessibilityGranted: { true }, shiftHeld: { shift })
+        let ticket = service.captureAtStop()
+        shift = false
+        let outcome = await service.deliver("hello", to: ticket, autoPaste: true) { true }
+        XCTAssertEqual(outcome.delivery, .delivered)
+        XCTAssertEqual(target.calls, ["paste: hello", "return"])
     }
 
 }
