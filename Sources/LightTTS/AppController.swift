@@ -22,6 +22,7 @@ import IOKit.ps
     let recordingLevel = RecordingLevel()
     @Published var started = Date()
     @Published var message = ""
+    @Published var copiedToClipboard = false
     @Published var history: [HistoryEntry] = []
     @Published var historySearch = ""
     @Published var historySearchVisible = false
@@ -287,6 +288,7 @@ import IOKit.ps
     }
     func start(pushToTalk: Bool = false) {
         guard state == "idle", historyMigration == nil, reprocessingHistoryID == nil else { return }
+        copiedToClipboard = false
         recordingUsesPushToTalk = pushToTalk
         unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
@@ -406,13 +408,16 @@ import IOKit.ps
                     return
                 }
                 var pasteWarning: String?
+                var copied = !sessionAutoPaste
                 if sessionAutoPaste {
                     let capture = await stopFocusTask.value
                     try Task.checkCancellation(); guard current == generation else { return }
                     if !AXIsProcessTrusted() {
                         pasteWarning = "Grant Accessibility to auto-paste. The transcription was copied to the clipboard."
                     } else if capture.secure {
-                        pasteWarning = "Copied: secure field"
+                        copied = true
+                    } else if let target = capture.target, case .unavailable = target.stopDisposition {
+                        copied = true
                     } else if let target = capture.target {
                         let typing = UserDefaults.standard.bool(forKey: "simulateTyping")
                         let send = UserDefaults.standard.bool(forKey: "sendOnShift")
@@ -423,11 +428,11 @@ import IOKit.ps
                                 try performTextInput(text, simulateTyping: typing, sendOnShift: send, shiftHeld: shiftHeld, insert: target.insert, type: target.type, sendReturn: target.sendReturn)
                             }.value
                             LaunchTrace.mark("paste-end")
-                        } catch FocusError.secure { pasteWarning = "Copied: secure field" }
+                        } catch FocusError.secure { copied = true }
                         catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
-                    } else { pasteWarning = "No focused editable field. The transcription was copied to the clipboard." }
+                    } else { copied = true }
                 }
-                if pasteWarning != nil || shouldCopyTranscript(autoPaste: sessionAutoPaste, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) {
+                if copied || pasteWarning != nil || shouldCopyTranscript(autoPaste: sessionAutoPaste, restoreClipboard: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true) {
                     writeTranscriptToClipboard(text)
                 }
                 try Task.checkCancellation(); guard current == generation else { return }
@@ -445,7 +450,7 @@ import IOKit.ps
                     if written { item.audioFile = filename }
                     if Task.isCancelled || current != generation { if written { deleteRecordings([item]) }; return }
                 }
-                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { state = "idle"; scheduleEngineUnload() } else { state = "done" }; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
+                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; copiedToClipboard = copied; if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { state = "idle"; scheduleEngineUnload() } else { state = "done" }; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
 
                 if state == "done" { try? await Task.sleep(nanoseconds: 150_000_000); if current == generation { hide() } }
             } catch { if current == generation { fail(error.localizedDescription) } }
