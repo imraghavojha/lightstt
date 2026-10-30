@@ -251,32 +251,7 @@ private struct ConfigurationPageView: View {
             Button { selection.wrappedValue = value } label: { VStack(spacing: values.first == "Auto" ? 8 : 5) {
                 ZStack {
                     if values.first == "Auto" {
-                        if index == 0 {
-                            HStack(spacing: 0) {
-                                LinearGradient(colors: [Color(red: 0.10, green: 0.06, blue: 0.30), Color(red: 0.03, green: 0.20, blue: 0.55), .black], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                LinearGradient(colors: [Color(white: 0.86), Color(red: 0.55, green: 0.79, blue: 0.92), Color(red: 0.12, green: 0.35, blue: 0.70)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                            }
-                        } else {
-                            LinearGradient(colors: index == 1 ? [Color(white: 0.86), Color(red: 0.55, green: 0.79, blue: 0.92), Color(red: 0.12, green: 0.35, blue: 0.70)] : [Color(red: 0.10, green: 0.06, blue: 0.30), Color(red: 0.03, green: 0.20, blue: 0.55), .black], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        }
-                        GeometryReader { proxy in
-                            Path { path in
-                                path.move(to: CGPoint(x: 0, y: proxy.size.height * 0.72))
-                                path.addLine(to: CGPoint(x: proxy.size.width * 0.62, y: 0))
-                                path.addLine(to: CGPoint(x: proxy.size.width * 0.78, y: 0))
-                                path.addLine(to: CGPoint(x: proxy.size.width * 0.16, y: proxy.size.height * 0.72))
-                                path.closeSubpath()
-                            }.fill(Color.cyan.opacity(index == 2 ? 0.18 : 0.42))
-                        }
-                        if index == 0 {
-                            HStack(spacing: 2) { ForEach(0..<2) { side in VStack(spacing: 1) { RoundedRectangle(cornerRadius: 2).fill(side == 0 ? Color.black.opacity(0.35) : Color.cyan.opacity(0.65)).frame(height: 11); Spacer(); HStack(spacing: 2) { Circle().fill(.yellow); Circle().fill(.pink); Spacer(minLength: 0) }.frame(height: 5).padding(3).background(side == 0 ? Color.black : Color.white, in: RoundedRectangle(cornerRadius: 5)) } } }.padding(3)
-                        } else {
-                            VStack(spacing: 2) {
-                                HStack { Spacer(); RoundedRectangle(cornerRadius: 2).fill(index == 1 ? Color.cyan.opacity(0.8) : Color.black.opacity(0.4)).frame(width: 31, height: 12) }
-                                Spacer()
-                                HStack { HStack(spacing: 3) { Circle().fill(.green); Circle().fill(.yellow); Circle().fill(.red); Spacer() }.frame(width: 28, height: 5).padding(5).background(index == 1 ? Color.white : Color.black, in: RoundedRectangle(cornerRadius: 5)); Spacer(minLength: 0) }
-                            }.padding(3)
-                        }
+                        ThemeArtwork(mode: index)
                     } else {
                         RoundedRectangle(cornerRadius: 8).fill(scheme == .dark ? Color.black.opacity(0.36) : (selection.wrappedValue == value ? Color.blue.opacity(0.10) : Color.white))
                         if value == "None" { Image(systemName: "eye.slash").foregroundStyle(.secondary) }
@@ -296,6 +271,34 @@ private struct ConfigurationPageView: View {
     private func keycap(_ text: String) -> some View { Text(text).font(.system(size: 11, weight: .semibold)).padding(.horizontal, text.count == 1 && !text.first!.isLetter ? 3 : 6).padding(.vertical, 2).background(Color.primary.opacity(0.13), in: RoundedRectangle(cornerRadius: 4)) }
     private func shortcutRow(_ title: String, subtitle: String, key: String, modifiers: String?, fallback: Int, enabled: String? = nil) -> some View {
         HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255)) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { SettingsDefaults.store.removeObject(forKey: key); if let modifiers { SettingsDefaults.store.removeObject(forKey: modifiers) } }; controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); ZStack { HStack(spacing: 4) { if let enabled, !SettingsDefaults.store.bool(forKey: enabled) { Text("Record shortcut").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(red: 217/255, green: 218/255, blue: 222/255) : Color(white: 93/255)) } else { let raw = modifiers == "pushHotkeyModifiers" ? pushHotkeyModifiers : (modifiers == nil ? 0 : hotkeyModifiers); let flags = NSEvent.ModifierFlags(rawValue: UInt(raw)); if flags.contains(.control) { keycap("⌃") }; if flags.contains(.option) { keycap("⌥") }; if flags.contains(.shift) { keycap("⇧") }; if flags.contains(.command) { keycap("⌘") }; let code = key == "cancelHotkeyCode" ? cancelHotkeyCode : (key == "pushHotkeyCode" ? pushHotkeyCode : hotkeyCode); keycap(keyLabel(code)) } } }.overlay { ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).opacity(0.015) }.id("\(key)-\(hotkeyCode)-\(hotkeyModifiers)-\(cancelHotkeyCode)-\(pushShortcutEnabled)-\(pushHotkeyCode)-\(pushHotkeyModifiers)").fixedSize(horizontal: true, vertical: false).frame(minHeight: 28) }.padding(.trailing, 6).frame(minHeight: 50)
+    }
+}
+
+private struct ThemeArtwork: View {
+    let mode: Int
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                if mode == 0 {
+                    HStack(spacing: 0) { desktop(dark: true); desktop(dark: false) }
+                } else {
+                    desktop(dark: mode == 2)
+                }
+            }.frame(width: proxy.size.width, height: proxy.size.height).clipped()
+        }
+    }
+    private func desktop(dark: Bool) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                LinearGradient(colors: dark ? [Color(red: 0.23, green: 0.16, blue: 0.50), Color(red: 0.01, green: 0.05, blue: 0.28), Color(red: 0.01, green: 0.20, blue: 0.60)] : [Color(red: 0.82, green: 0.82, blue: 0.77), Color(red: 0.35, green: 0.70, blue: 0.90), Color(red: 0.01, green: 0.17, blue: 0.59)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: 25)); path.addLine(to: CGPoint(x: 35, y: 0)); path.addLine(to: CGPoint(x: 50, y: 0)); path.addLine(to: CGPoint(x: 12, y: 28)); path.closeSubpath()
+                }.fill(Color.white.opacity(dark ? 0.13 : 0.28))
+                RoundedRectangle(cornerRadius: 3).fill(dark ? Color(red: 0.01, green: 0.12, blue: 0.40) : Color(red: 0.43, green: 0.72, blue: 0.94)).frame(width: 39, height: 14).overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.28), lineWidth: 0.5)).offset(x: max(0, geometry.size.width - 41), y: 6)
+                RoundedRectangle(cornerRadius: 8).fill(dark ? Color(red: 0.03, green: 0.04, blue: 0.09) : Color(red: 0.91, green: 0.94, blue: 0.98)).frame(width: 52, height: 25).overlay(alignment: .topLeading) { HStack(spacing: 4) { Circle().fill(Color.green); Circle().fill(Color.yellow); Circle().fill(Color.red) }.frame(height: 6).padding(.leading, 10).padding(.top, 9) }.offset(x: 0, y: 25)
+                Circle().fill(Color.white.opacity(0.8)).frame(width: 4, height: 4).offset(x: max(0, geometry.size.width - 7), y: 3)
+            }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
+        }
     }
 }
 
