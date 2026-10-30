@@ -41,6 +41,37 @@ struct NoopMediaController: MediaControlling {
     func resume(_ players: [String]) {}
 }
 
+/// Player operations are serialized by AudioSettings' session queue.
+protocol PlayerControlling {
+    func runningPlayers() -> [String]
+    func authorized(_ player: String) -> Bool
+    func state(_ player: String) -> String?
+    func pause(_ player: String) -> Bool
+    func resume(_ player: String)
+}
+
+enum PlayerPermissionError: Error { case missing }
+
+final class PlayerMediaController: MediaControlling {
+    private let players: any PlayerControlling
+    private let gate: MediaGate
+    init(players: any PlayerControlling, gate: MediaGate) { self.players = players; self.gate = gate }
+    func pausePlaying() throws -> [String] {
+        let running = players.runningPlayers()
+        guard running.allSatisfy({ players.authorized($0) }) else { throw PlayerPermissionError.missing }
+        var paused: [String] = []
+        for player in running where players.state(player) == "playing" {
+            if gate.ifActive({ players.pause(player) }) { paused.append(player) }
+        }
+        return paused
+    }
+    func resume(_ paused: [String]) {
+        for player in paused where players.runningPlayers().contains(player) && players.authorized(player) && players.state(player) == "paused" {
+            _ = gate.ifStopped { players.resume(player); return true }
+        }
+    }
+}
+
 protocol OutputVolumeControlling {
     func volumes() -> [(UInt32, Float)]
     func setVolume(_ value: Float, channel: UInt32)

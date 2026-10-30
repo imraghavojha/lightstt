@@ -104,3 +104,35 @@ precondition(!intent.finish { true })
 intent.begin()
 precondition(!intent.finish { true })
 print("Media intent changes prevent automatic resume")
+
+final class FakePlayers: PlayerControlling {
+    var states: [String: String] = [:]
+    var permitted = true
+    var pauses: [String] = []
+    var resumes: [String] = []
+    func runningPlayers() -> [String] { Array(states.keys) }
+    func authorized(_ player: String) -> Bool { permitted }
+    func state(_ player: String) -> String? { states[player] }
+    func pause(_ player: String) -> Bool { pauses.append(player); states[player] = "paused"; return true }
+    func resume(_ player: String) { resumes.append(player); states[player] = "playing" }
+}
+let players = FakePlayers(), playerGate = MediaGate()
+let playerController = PlayerMediaController(players: players, gate: playerGate)
+let playerSession = MediaPauseSession(controller: playerController)
+func startPlayers() throws { let token = playerGate.start(); playerGate.setOperation(token); try playerSession.begin() }
+func stopPlayers() { playerGate.stop(); playerSession.end() }
+try startPlayers(); stopPlayers()
+precondition(players.pauses.isEmpty && players.resumes.isEmpty)
+players.states["music"] = "playing"
+try startPlayers(); stopPlayers()
+precondition(players.pauses == ["music"] && players.resumes == ["music"])
+try startPlayers(); players.states["music"] = "playing"; stopPlayers()
+precondition(players.resumes.count == 1)
+try startPlayers(); players.states.removeAll(); stopPlayers()
+precondition(players.resumes.count == 1)
+players.states["music"] = "playing"; players.permitted = false
+let deniedToken = playerGate.start(); playerGate.setOperation(deniedToken)
+do { try playerSession.begin(); preconditionFailure("Expected permission failure") } catch PlayerPermissionError.missing {}
+playerGate.stop(); playerSession.end()
+precondition(players.pauses.count == 3 && players.resumes.count == 1)
+print("Player permission and lifecycle checks passed")
