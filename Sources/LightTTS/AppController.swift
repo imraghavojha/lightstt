@@ -22,7 +22,7 @@ import ServiceManagement
     @Published var historySegmented = false
     private var segmentStop: DispatchWorkItem?
     private var historyPlayer: AVAudioPlayer?
-    @Published var loginEnabled = SMAppService.mainApp.status == .enabled
+    @Published var loginEnabled = false
     @Published var models: [Model] = []
     @Published var busyModel: String?
     @Published var downloadProgress: Double = 0
@@ -194,7 +194,10 @@ import ServiceManagement
             guard allowed else { fail("Microphone access is required. Enable it in System Settings."); return }
             do {
                 let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.level = value } }
-                try capture.start(); audio = capture; if !isTestAudio || ProcessInfo.processInfo.environment["LIGHTTTS_TEST_VOLUME"] == "1" { message = audioSettings.begin() ?? "" }; AudioSettings.cue(start: true); started = Date(); state = "recording"; if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }; showPanel()
+                let manageAudio = !isTestAudio || ProcessInfo.processInfo.environment["LIGHTTTS_TEST_VOLUME"] == "1"
+                if manageAudio { message = audioSettings.begin() ?? "" }
+                do { try capture.start() } catch { if manageAudio { audioSettings.end() }; throw error }
+                audio = capture; AudioSettings.cue(start: true); started = Date(); state = "recording"; if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }; showPanel()
             } catch { fail(error.localizedDescription) }
         }
     }
@@ -287,6 +290,12 @@ import ServiceManagement
             else { p.alphaValue = 1 } }
     }
     func pruneHistory() { let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; for item in removed { if let url = historyAudioURL(item) { try? FileManager.default.removeItem(at: url) } }; history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
+    func refreshLoginStatus() { loginEnabled = SMAppService.mainApp.status == .enabled }
+    func setLoginEnabled(_ enabled: Bool) {
+        do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
+        catch { message = error.localizedDescription }
+        refreshLoginStatus()
+    }
     func checkUpdates(interactive: Bool = true) {
         guard let url = URL(string: "https://api.github.com/repos/imraghavojha/lighttts/releases/latest") else { return }
         Task {

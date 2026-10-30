@@ -160,10 +160,10 @@ private struct LibraryPageView: View {
                     } }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1)
                     VStack(spacing: 12) {
-                        SettingsCard { SettingsRow(title: "Mode") { Text(item.mode ?? "Not available").lineLimit(1).foregroundStyle(.secondary) } }
+                        SettingsCard { HStack(spacing: 10) { Image(systemName: "mic.fill"); Text(item.mode ?? "Not available").lineLimit(1); Spacer() }.frame(minHeight: 48).help("Recording mode") }
                         SettingsCard {
-                            SettingsRow(title: "Input") { Text(item.inputName ?? "Not available").lineLimit(1).truncationMode(.tail).foregroundStyle(.secondary); Text(item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—").font(.caption).foregroundStyle(.secondary) }; Divider()
-                            SettingsRow(title: "Voice model") { Text(item.modelName ?? "Not available").lineLimit(1).truncationMode(.tail).foregroundStyle(.secondary); Text(item.processingDuration.map { String(format: "%.0fms", $0 * 1000) } ?? "—").font(.caption).foregroundStyle(.secondary) }
+                            HStack(spacing: 10) { Image(systemName: "mic.fill"); Text(item.inputName ?? "Not available").lineLimit(1).truncationMode(.tail); Spacer(minLength: 4); Text(item.recordingDuration.map { String(format: "%.1fs", $0) } ?? "—").font(.caption).foregroundStyle(.secondary) }.frame(minHeight: 48).help("Input device and recording duration"); Divider()
+                            HStack(spacing: 10) { Image(systemName: "waveform"); Text(item.modelName ?? "Not available").lineLimit(1).truncationMode(.tail); Spacer(minLength: 4); Text(item.processingDuration.map { String(format: "%.0fms", $0 * 1000) } ?? "—").font(.caption).foregroundStyle(.secondary) }.frame(minHeight: 48).help("Voice model and processing duration")
                         }
                         Spacer()
                         HStack(spacing: 6) { Button("Report issue") { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/issues/new")!) }; Button("Open file location") { controller.revealHistory(item) } }.controlSize(.small)
@@ -234,7 +234,7 @@ private struct ConfigurationPageView: View {
             SettingsCard {
                 SettingsRow(title: "Update application") { Button("Check for Updates…") { controller.checkUpdates() } }; Divider()
                 SettingsRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; Divider()
-                SettingsRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: $controller.loginEnabled).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")).onChange(of: controller.loginEnabled) { value in do { if value { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch { controller.loginEnabled = SMAppService.mainApp.status == .enabled; controller.message = error.localizedDescription } } }; Divider()
+                SettingsRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: Binding(get: { controller.loginEnabled }, set: { controller.setLoginEnabled($0) })).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")) }; Divider()
                 SettingsRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Error logging")).help("Write errors to a local log") }; Divider()
                 SettingsRow(title: "Keep recordings for", help: "Automatically remove older recordings") { Picker("Keep recordings for", selection: retentionBinding) { Text("Forever").tag(0); Text("1 day").tag(1); Text("1 week").tag(7); Text("2 weeks").tag(14); Text("1 month").tag(30); Text("6 months").tag(180); Text("1 year").tag(365) }.labelsHidden().frame(width: 140) }
             }
@@ -255,7 +255,7 @@ private struct ConfigurationPageView: View {
                 }
             }
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
-        }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24) }.font(.system(size: 14))
+        }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24) }.font(.system(size: 14)).onAppear { controller.refreshLoginStatus() }
     }
     private var retentionBinding: Binding<Int> {
         Binding(get: { retention }, set: { value in
