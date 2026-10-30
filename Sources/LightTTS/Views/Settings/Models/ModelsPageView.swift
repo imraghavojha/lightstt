@@ -163,7 +163,9 @@ struct ModelsPageView: View {
     private func specs(_ model: Model) -> some View {
         HStack(spacing: 5) { ForEach(["bolt.fill", "translate", "character.book.closed.fill", "person.2.fill", "globe.americas.fill"], id: \.self) { symbol in
             let active = (symbol == "translate" && ["whisper-tiny", "whisper-medium"].contains(model.id)) || (symbol == "character.book.closed.fill" && ["whisper-medium", "whisper-large-v3-turbo"].contains(model.id))
-            let hue = symbol == "translate" ? Color(red: 75/255, green: 165/255, blue: 207/255) : Color(red: 119/255, green: 91/255, blue: 210/255)
+            let hue = symbol == "translate"
+                ? (colorScheme == .dark ? Color(red: 60/255, green: 181/255, blue: 247/255) : Color(red: 58/255, green: 174/255, blue: 238/255))
+                : (colorScheme == .dark ? Color(red: 157/255, green: 129/255, blue: 252/255) : Color(red: 106/255, green: 76/255, blue: 208/255))
             Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(active ? hue : Color.secondary.opacity(0.6)).frame(width: 24, height: 19).background(active ? hue.opacity(colorScheme == .dark ? 0.10 : 0.08) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5))
         } }
     }
