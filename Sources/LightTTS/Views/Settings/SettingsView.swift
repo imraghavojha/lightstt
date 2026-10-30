@@ -92,13 +92,13 @@ private struct SoundPageView: View {
     @AppStorage("recordingSound") private var recordingSound = "Pause"
     @AppStorage("increaseMicVolume") private var increaseMic = false
     var body: some View {
-        ScrollView { VStack(alignment: .leading, spacing: 18) {
+        ScrollView { VStack(alignment: .leading, spacing: 0) {
             SettingsCard {
-                SettingsRow(title: "Sound effects") { HStack(spacing: 0) { ForEach(["Simple", "Classic", "Off"], id: \.self) { value in Button { sound = value } label: { Text(value).font(.system(size: 14, weight: sound == value ? .semibold : .regular)).frame(maxWidth: .infinity).frame(height: 26).foregroundStyle(sound == value ? (scheme == .dark ? Color.white : Color.black) : Color.secondary).background(sound == value ? (scheme == .dark ? Color(red: 91/255, green: 93/255, blue: 99/255) : Color.white) : Color.clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain) } }.padding(2).frame(width: 168).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))) }
-                Divider()
+                SettingsRow(title: "Sound effects") { HStack(spacing: 0) { ForEach(["Simple", "Classic", "Off"], id: \.self) { value in Button { sound = value } label: { Text(value).font(.system(size: 12, weight: sound == value ? .semibold : .regular)).frame(width: value == "Classic" ? 62 : value == "Simple" ? 62 : 40, height: 24).foregroundStyle(sound == value ? (scheme == .dark ? Color.white : Color.black) : Color.secondary).background(sound == value ? (scheme == .dark ? Color(red: 91/255, green: 93/255, blue: 99/255) : Color.white) : Color.clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain) } }.padding(2).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))) }
+                PageRule()
                 SettingsRow(title: "Volume") { Button { playSound(start: true) } label: { Image(systemName: "speaker.fill") }.buttonStyle(.plain); SoundVolumeSlider(value: $volume, dark: scheme == .dark); Button { playSound(start: false) } label: { Image(systemName: "speaker.wave.2.fill") }.buttonStyle(.plain) }
             }
-            Text("Recording").font(.system(size: 14, weight: .semibold))
+            Text("Recording").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 9)
             SettingsCard {
                 SettingsRow(title: "Sound while recording") {
                     Menu {
@@ -107,7 +107,7 @@ private struct SoundPageView: View {
                         HStack(spacing: 8) { Image(systemName: recordingSound == "Pause" ? "pause.circle" : recordingSound == "Mute" ? "speaker.slash" : "speaker.wave.2"); Text(recordingSound == "Pause" ? "Pause (Unavailable)" : recordingSound); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }.padding(.horizontal, 9)
                     }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: recordingSound == "Pause" ? 180 : 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause is unavailable and leaves playback unchanged; Muffle lowers volume if system audio capture is unavailable.")
                 }
-                Divider()
+                PageRule()
                 HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.frame(minHeight: 48)
             }
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.secondary) }
@@ -214,49 +214,77 @@ private struct ConfigurationPageView: View {
     @AppStorage("autoCheckUpdates") private var autoCheckUpdates = false
     @AppStorage("errorLogging") private var errorLogging = false
     var body: some View {
-        ScrollView { VStack(alignment: .leading, spacing: 18) {
+        Group { if controller.showAdvanced { advancedPage } else { configurationPage } }
+            .onAppear { controller.refreshLoginStatus() }
+            .onDisappear { controller.showAdvanced = false }
+    }
+    private var configurationPage: some View {
+        ScrollView { VStack(alignment: .leading, spacing: 0) {
             SettingsCard {
-                HStack(alignment: .top) { Text("Theme").padding(.top, 16); Spacer(); choices(["Auto", "Light", "Dark"], selection: $theme, icons: ["circle.lefthalf.filled", "sun.max.fill", "moon.fill"]) }.padding(.vertical, 8)
-                Divider()
-                HStack(alignment: .top) { Text("Recording window").padding(.top, 16); Spacer(); choices(["Classic", "Mini", "None"], selection: $recordingWindow, icons: ["waveform", "waveform", "eye.slash"]) }.padding(.vertical, 8)
-                Divider()
+                HStack(alignment: .top) { Text("Theme").padding(.top, 4); Spacer(); choices(["Auto", "Light", "Dark"], selection: $theme, icons: ["circle.lefthalf.filled", "sun.max.fill", "moon.fill"]) }.padding(.top, 12).padding(.bottom, 7)
+                PageRule()
+                HStack(alignment: .top) { Text("Recording window").padding(.top, 4); Spacer(); choices(["Classic", "Mini", "None"], selection: $recordingWindow, icons: ["waveform", "waveform", "eye.slash"]) }.padding(.top, 12).padding(.bottom, 7)
+                PageRule()
                 HStack(spacing: 8) { Text("Always show"); Image(systemName: "questionmark.circle").help("Keep the mini recording window visible"); Spacer(); Toggle("", isOn: $alwaysShow).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Always show")).disabled(recordingWindow != "Mini") }.frame(height: 45)
             }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }.onChange(of: alwaysShow) { _ in controller.refreshRecordingWindow() }
-            Text("Keyboard Shortcuts").font(.system(size: 14, weight: .semibold))
+            Text("Keyboard Shortcuts").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 9)
             SettingsCard {
-                shortcutRow("Toggle Recording", subtitle: "Starts and stops recordings", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); Divider()
-                shortcutRow("Cancel Recording", subtitle: "Discards the active recording", key: "cancelHotkeyCode", modifiers: nil, fallback: 53); Divider()
-                HStack { VStack(alignment: .leading, spacing: 2) { Text("Change mode"); Text("Activates the mode switcher").font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "arrow.counterclockwise"); keycap("⌥"); keycap("⇧"); keycap("K") }.frame(minHeight: 50).help("Modes are not included in LightTTS"); Divider()
-                shortcutRow("Push to Talk", subtitle: "Hold to record, release when done", key: "pushHotkeyCode", modifiers: "pushHotkeyModifiers", fallback: 49, enabled: "pushShortcutEnabled"); Divider()
-                HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); MouseShortcutRecorder().frame(width: 120, height: 28) }.frame(minHeight: 50)
+                shortcutRow("Toggle Recording", subtitle: "Starts and stops recordings", key: "hotkeyCode", modifiers: "hotkeyModifiers", fallback: 49); PageRule()
+                shortcutRow("Cancel Recording", subtitle: "Discards the active recording", key: "cancelHotkeyCode", modifiers: nil, fallback: 53); PageRule()
+                HStack { VStack(alignment: .leading, spacing: 2) { Text("Change mode"); Text("Activates the mode switcher").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(white: 0.78) : Color(white: 0.40)) }; Spacer(); Image(systemName: "arrow.counterclockwise"); keycap("⌥"); keycap("⇧"); keycap("K") }.frame(minHeight: 50).help("Modes are not included in LightTTS"); PageRule()
+                shortcutRow("Push to Talk", subtitle: "Hold to record, release when done", key: "pushHotkeyCode", modifiers: "pushHotkeyModifiers", fallback: 49, enabled: "pushShortcutEnabled"); PageRule()
+                HStack { VStack(alignment: .leading, spacing: 2) { Text("Mouse shortcut"); Text("Tap to toggle, or hold and release when done").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(white: 0.78) : Color(white: 0.40)) }; Spacer(); MouseShortcutRecorder().frame(width: 120, height: 28) }.frame(minHeight: 50)
             }
-            Text("Application").font(.system(size: 14, weight: .semibold))
+            Text("Application").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 9)
             SettingsCard {
-                SettingsRow(title: "Update application") { Button("Check for Updates…") { controller.checkUpdates() } }; Divider()
-                SettingsRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; Divider()
-                SettingsRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: Binding(get: { controller.loginEnabled }, set: { controller.setLoginEnabled($0) })).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")) }; Divider()
-                SettingsRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Error logging")).help("Write errors to a local log") }; Divider()
-                SettingsRow(title: "Keep recordings for", help: "Automatically remove older recordings") { Picker("Keep recordings for", selection: retentionBinding) { Text("Forever").tag(0); Text("1 day").tag(1); Text("1 week").tag(7); Text("2 weeks").tag(14); Text("1 month").tag(30); Text("6 months").tag(180); Text("1 year").tag(365) }.labelsHidden().frame(width: 140) }
+                ConfigurationApplicationRow(title: "Update application") { Button("Check for Updates…") { controller.checkUpdates() } }; PageRule()
+                ConfigurationApplicationRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; PageRule()
+                ConfigurationApplicationRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: Binding(get: { controller.loginEnabled }, set: { controller.setLoginEnabled($0) })).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")) }; PageRule()
+                ConfigurationApplicationRow(title: "Error logging", help: "Write diagnostic errors to a local log") { Toggle("", isOn: $errorLogging).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Error logging")).help("Write errors to a local log") }; PageRule()
+                ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { Menu { ForEach([(0, "Forever"), (1, "1 day"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (180, "6 months"), (365, "1 year")], id: \.0) { days, label in Button(label) { retentionBinding.wrappedValue = days } } } label: { HStack { Text(retentionLabel); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }.padding(.horizontal, 9).frame(width: 125, height: 28).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 0.5)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize() }
             }
-            SettingsCard { Button { controller.showAdvanced.toggle() } label: { HStack { Text("Advanced settings"); Spacer(); Image(systemName: controller.showAdvanced ? "chevron.down" : "chevron.right").foregroundStyle(.secondary) }.frame(height: 48).contentShape(Rectangle()) }.buttonStyle(.plain) }
-            if controller.showAdvanced {
-                Text("Text input").font(.system(size: 14, weight: .semibold))
-                SettingsCard {
-                    SettingsRow(title: "Paste result text") { Toggle("", isOn: $pasteResult).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Paste result text")) }; Divider()
-                    SettingsRow(title: "Restore clipboard after pasting") { Toggle("", isOn: $restoreClipboard).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Restore clipboard after pasting")).disabled(!pasteResult || simulateTyping) }; Divider()
-                    SettingsRow(title: "Hold Shift to auto-send") { Toggle("", isOn: $sendOnShift).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Hold Shift to auto-send")).disabled(!pasteResult) }; Divider()
-                    SettingsRow(title: "Simulate keypresses") { Toggle("", isOn: $simulateTyping).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Simulate keypresses")).disabled(!pasteResult) }
-                }
-                Text("Audio processing").font(.system(size: 14, weight: .semibold))
-                SettingsCard {
-                    SettingsRow(title: "Silence removal") { Toggle("", isOn: $removeSilence).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Silence removal")) }; Divider()
-                    SettingsRow(title: "Dynamic normalization") { Toggle("", isOn: $normalizeAudio).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Dynamic normalization")) }; Divider()
-                    SettingsRow(title: "Accessibility") { Button("Request Access") { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) } }
-                }
-            }
+            SettingsCard { Button { controller.showAdvanced.toggle() } label: { HStack { Text("Advanced settings"); Spacer(); Image(systemName: controller.showAdvanced ? "chevron.down" : "chevron.right").foregroundStyle(.secondary) }.frame(height: 48).contentShape(Rectangle()) }.buttonStyle(.plain) }.padding(.top, 18)
             if !controller.message.isEmpty { Text(controller.message).font(.caption).foregroundStyle(.red) }
-        }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24) }.font(.system(size: 14)).onAppear { controller.refreshLoginStatus() }
+        }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24) }.font(.system(size: 13))
     }
+    private var advancedPage: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button { controller.showAdvanced = false } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()) }.buttonStyle(.plain).help("Back to Configuration")
+                Text("Advanced settings").font(.system(size: 13, weight: .bold)); Spacer()
+            }.padding(.horizontal, 24).padding(.bottom, 8)
+            ScrollView { VStack(alignment: .leading, spacing: 0) {
+                advancedHeading("Application")
+                SettingsCard {
+                    unavailableRow("Show in Dock"); PageRule()
+                    unavailableRow("Start Recording on Menubar Click"); PageRule()
+                    unavailableRow("Close after transcription")
+                }
+                advancedHeading("Voice model")
+                SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Voice model lifetime is managed automatically") { Text("Automatic").foregroundStyle(.secondary) } }
+                advancedHeading("Audio processing")
+                SettingsCard {
+                    ConfigurationApplicationRow(title: "Silence removal", help: "Remove silence from recordings") { Toggle("", isOn: $removeSilence).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Silence removal")) }; PageRule()
+                    ConfigurationApplicationRow(title: "Dynamic normalization", help: "Normalize recording volume") { Toggle("", isOn: $normalizeAudio).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Dynamic normalization")) }
+                }
+                advancedHeading("App folder location")
+                SettingsCard { ConfigurationApplicationRow(title: "App folder location") { Text("Managed by LightTTS").foregroundStyle(.secondary) } }
+                advancedHeading("Text input")
+                SettingsCard {
+                    unavailableRow("Clipboard content"); PageRule()
+                    unavailableRow("Clipboard history"); PageRule()
+                    ConfigurationApplicationRow(title: "Paste result text", help: "Paste the transcription into the focused app") { Toggle("", isOn: $pasteResult).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Paste result text")) }; PageRule()
+                    unavailableRow("Hold shift to auto-send after paste"); PageRule()
+                    unavailableRow("Simulate keypresses")
+                }
+            }.padding(.horizontal, 24).padding(.bottom, 24) }.font(.system(size: 13))
+        }
+    }
+    private func advancedHeading(_ title: String) -> some View { Text(title).font(.system(size: 13, weight: .semibold)).padding(.top, 14).padding(.bottom, 9) }
+    private func unavailableRow(_ title: String) -> some View {
+        ConfigurationApplicationRow(title: title, help: "Not available in LightTTS") { Toggle("", isOn: .constant(false)).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: title)).disabled(true) }
+    }
+    private var retentionLabel: String { [0: "Forever", 1: "1 day", 7: "1 week", 14: "2 weeks", 30: "1 month", 180: "6 months", 365: "1 year"][retention] ?? "Forever" }
     private var retentionBinding: Binding<Int> {
         Binding(get: { retention }, set: { value in
             if value > 0 && (retention == 0 || value < retention) {
@@ -279,6 +307,15 @@ private struct ConfigurationPageView: View {
                         } else {
                             LinearGradient(colors: index == 1 ? [Color(white: 0.86), Color(red: 0.55, green: 0.79, blue: 0.92), Color(red: 0.12, green: 0.35, blue: 0.70)] : [Color(red: 0.10, green: 0.06, blue: 0.30), Color(red: 0.03, green: 0.20, blue: 0.55), .black], startPoint: .topLeading, endPoint: .bottomTrailing)
                         }
+                        GeometryReader { proxy in
+                            Path { path in
+                                path.move(to: CGPoint(x: 0, y: proxy.size.height * 0.72))
+                                path.addLine(to: CGPoint(x: proxy.size.width * 0.62, y: 0))
+                                path.addLine(to: CGPoint(x: proxy.size.width * 0.78, y: 0))
+                                path.addLine(to: CGPoint(x: proxy.size.width * 0.16, y: proxy.size.height * 0.72))
+                                path.closeSubpath()
+                            }.fill(Color.cyan.opacity(index == 2 ? 0.18 : 0.42))
+                        }
                         if index == 0 {
                             HStack(spacing: 2) { ForEach(0..<2) { side in VStack(spacing: 1) { RoundedRectangle(cornerRadius: 2).fill(side == 0 ? Color.black.opacity(0.35) : Color.cyan.opacity(0.65)).frame(height: 11); Spacer(); HStack(spacing: 2) { Circle().fill(.yellow); Circle().fill(.pink); Spacer(minLength: 0) }.frame(height: 5).padding(3).background(side == 0 ? Color.black : Color.white, in: RoundedRectangle(cornerRadius: 5)) } } }.padding(3)
                         } else {
@@ -293,19 +330,30 @@ private struct ConfigurationPageView: View {
                         if value == "None" { Image(systemName: "eye.slash").foregroundStyle(.secondary) }
                         else if value == "Classic" {
                             VStack(spacing: 2) {
-                                HStack(spacing: 1) { ForEach(0..<25) { index in Capsule().fill(.white).frame(width: 1, height: CGFloat(3 + ((index * 7) % 12))) } }.frame(height: 16)
+                                HStack(spacing: 1) { ForEach(Array([2, 4, 7, 5, 9, 7, 4, 6, 3, 5, 8, 5, 4, 7, 10, 8, 6, 5, 3, 6, 4, 3, 2].enumerated()), id: \.offset) { _, height in Capsule().fill(.white).frame(width: 1, height: CGFloat(height)) } }.frame(height: 16)
                                 RoundedRectangle(cornerRadius: 3).fill(Color(white: 0.25)).frame(width: 56, height: 6)
                             }.frame(width: 62, height: 30).background(.black, in: RoundedRectangle(cornerRadius: 6))
-                        } else { Image(systemName: "waveform").font(.system(size: 13)).foregroundStyle(.white).frame(width: 48, height: 20).background(.black, in: Capsule()) }
+                        } else { HStack(spacing: 2) { ForEach(Array([4, 8, 11, 6, 4, 8, 5].enumerated()), id: \.offset) { _, height in Capsule().fill(.white).frame(width: 2, height: CGFloat(height)) } }.frame(width: 48, height: 20).background(.black, in: Capsule()) }
                     }
-                }.frame(width: values.first == "Auto" ? 70 : 95, height: 44).clipShape(RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(selection.wrappedValue == value ? Color(red: 69/255, green: 151/255, blue: 247/255) : Color.primary.opacity(0.2), lineWidth: selection.wrappedValue == value ? 2 : 1))
-                Text(value).font(.system(size: 12, weight: .medium)).lineLimit(1).fixedSize(horizontal: true, vertical: false).foregroundStyle(selection.wrappedValue == value ? .primary : .secondary)
+                }.frame(width: values.first == "Auto" ? 70 : 95, height: 44).clipShape(RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.2), lineWidth: 0.5)).overlay(RoundedRectangle(cornerRadius: 10).stroke(selection.wrappedValue == value ? Color(red: 0/255, green: 145/255, blue: 255/255) : .clear, lineWidth: 2).padding(-3))
+                Text(value).font(.system(size: 11, weight: .medium)).lineLimit(1).fixedSize(horizontal: true, vertical: false).foregroundStyle(selection.wrappedValue == value ? .primary : .secondary)
             } }.buttonStyle(.plain)
         } }
     }
     private func keyLabel(_ code: Int) -> String { let letters = [0:"A",1:"S",2:"D",3:"F",4:"H",5:"G",6:"Z",7:"X",8:"C",9:"V",11:"B",12:"Q",13:"W",14:"E",15:"R",16:"Y",17:"T",31:"O",32:"U",34:"I",35:"P",37:"L",38:"J",40:"K",45:"N",46:"M"]; return code == 49 ? "Space" : code == 53 ? "esc" : (letters[code] ?? "Key \(code)") }
-    private func keycap(_ text: String) -> some View { Text(text).font(.system(size: 11, weight: .semibold)).padding(.horizontal, 6).padding(.vertical, 4).background(Color.primary.opacity(0.13), in: RoundedRectangle(cornerRadius: 4)) }
+    private func keycap(_ text: String) -> some View { Text(text).font(.system(size: 11, weight: .semibold)).padding(.horizontal, 6).padding(.vertical, 2).background(Color.primary.opacity(0.13), in: RoundedRectangle(cornerRadius: 4)) }
     private func shortcutRow(_ title: String, subtitle: String, key: String, modifiers: String?, fallback: Int, enabled: String? = nil) -> some View {
-        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { SettingsDefaults.store.removeObject(forKey: key); if let modifiers { SettingsDefaults.store.removeObject(forKey: modifiers) } }; controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark") }.buttonStyle(.plain); ZStack { HStack(spacing: 4) { if let enabled, !SettingsDefaults.store.bool(forKey: enabled) { Text("Record shortcut").font(.system(size: 11)).foregroundStyle(.secondary) } else { let raw = modifiers == "pushHotkeyModifiers" ? pushHotkeyModifiers : (modifiers == nil ? 0 : hotkeyModifiers); let flags = NSEvent.ModifierFlags(rawValue: UInt(raw)); if flags.contains(.control) { keycap("⌃") }; if flags.contains(.option) { keycap("⌥") }; if flags.contains(.shift) { keycap("⇧") }; if flags.contains(.command) { keycap("⌘") }; let code = key == "cancelHotkeyCode" ? cancelHotkeyCode : (key == "pushHotkeyCode" ? pushHotkeyCode : hotkeyCode); keycap(keyLabel(code)) } }; ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).opacity(0.015) }.id("\(key)-\(hotkeyCode)-\(hotkeyModifiers)-\(cancelHotkeyCode)-\(pushShortcutEnabled)-\(pushHotkeyCode)-\(pushHotkeyModifiers)").frame(minWidth: 60, maxWidth: 120, minHeight: 28) }.frame(minHeight: 50)
+        HStack { VStack(alignment: .leading, spacing: 2) { Text(title); Text(subtitle).font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(white: 0.78) : Color(white: 0.40)) }; Spacer(); Button { if let enabled { SettingsDefaults.store.set(false, forKey: enabled) } else { SettingsDefaults.store.removeObject(forKey: key); if let modifiers { SettingsDefaults.store.removeObject(forKey: modifiers) } }; controller.objectWillChange.send() } label: { Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain); ZStack { HStack(spacing: 4) { if let enabled, !SettingsDefaults.store.bool(forKey: enabled) { Text("Record shortcut").font(.system(size: 10)).foregroundStyle(scheme == .dark ? Color(white: 0.78) : Color(white: 0.40)) } else { let raw = modifiers == "pushHotkeyModifiers" ? pushHotkeyModifiers : (modifiers == nil ? 0 : hotkeyModifiers); let flags = NSEvent.ModifierFlags(rawValue: UInt(raw)); if flags.contains(.control) { keycap("⌃") }; if flags.contains(.option) { keycap("⌥") }; if flags.contains(.shift) { keycap("⇧") }; if flags.contains(.command) { keycap("⌘") }; let code = key == "cancelHotkeyCode" ? cancelHotkeyCode : (key == "pushHotkeyCode" ? pushHotkeyCode : hotkeyCode); keycap(keyLabel(code)) } }; ShortcutRecorder(codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled).opacity(0.015) }.id("\(key)-\(hotkeyCode)-\(hotkeyModifiers)-\(cancelHotkeyCode)-\(pushShortcutEnabled)-\(pushHotkeyCode)-\(pushHotkeyModifiers)").fixedSize(horizontal: true, vertical: false).frame(minHeight: 28) }.frame(minHeight: 50)
     }
+}
+
+private struct ConfigurationApplicationRow<Content: View>: View {
+    let title: String
+    var help: String? = nil
+    @ViewBuilder var content: Content
+    var body: some View { HStack(spacing: 8) { Text(title); if let help { Image(systemName: "info.circle").foregroundStyle(.secondary).help(help) }; Spacer(); content }.frame(minHeight: title == "Keep recordings for" ? 58 : 43) }
+}
+
+private struct PageRule: View {
+    var body: some View { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5) }
 }
