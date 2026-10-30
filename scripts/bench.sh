@@ -3,7 +3,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bench_dir="$(mktemp -d "${TMPDIR:-/tmp}/lighttts-bundle.XXXXXX")"
-trap 'rm -rf "$bench_dir"' EXIT
+bench_pid=""
+cleanup() {
+    if [[ -n "$bench_pid" ]] && kill -0 "$bench_pid" 2>/dev/null; then
+        kill -TERM "$bench_pid" 2>/dev/null || true
+        wait "$bench_pid" 2>/dev/null || true
+    fi
+    rm -rf "$bench_dir"
+}
+trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 CONFIG="${LIGHTTTS_BUILD_CONFIGURATION:-release}"
@@ -15,7 +23,11 @@ cp "$BIN/LightTTS" "$APP/Contents/MacOS/LightTTS"
 cp "$BIN/LightTTSEngine" "$APP/Contents/Helpers/LightTTSEngine"
 install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/Helpers/LightTTSEngine"
 for bundle in "$BIN"/*.bundle; do [ -e "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"; done
-for framework in "$BIN"/*.framework; do [ -e "$framework" ] && cp -R "$framework" "$APP/Contents/Frameworks/"; done
+for framework in "$BIN"/*.framework; do
+    [ -e "$framework" ] || continue
+    name="$(basename "$framework")"
+    if otool -L "$BIN/LightTTS" "$BIN/LightTTSEngine" | grep -Fq "@rpath/$name/"; then cp -R "$framework" "$APP/Contents/Frameworks/"; fi
+done
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,7 +41,7 @@ codesign --force --sign "$HASH" --keychain "$KEYCHAIN" "$APP/Contents/Helpers/Li
 codesign --force --deep --sign "$HASH" --keychain "$KEYCHAIN" "$APP"
 codesign --force --sign "$HASH" --keychain "$KEYCHAIN" --requirements "=designated => identifier \"com.lighttts.app\" and certificate leaf = H\"$HASH\"" "$APP"
 codesign --verify --deep --strict "$APP"
-python3 - "$APP" "$@" <<'PY'
+python3 - "$APP" "$@" <<'PY' &
 import os, subprocess, tempfile, time, re, statistics, pathlib, signal, sys
 out = pathlib.Path(tempfile.mkdtemp(prefix='lighttts-bench-'))
 print('Evidence:', out, flush=True)
@@ -41,7 +53,14 @@ def terminate(path):
     for pid in pids(path):
         try: os.kill(pid, 15)
         except ProcessLookupError: pass
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 5
+    while pids(path) and time.monotonic() < deadline: time.sleep(.2)
+    # Some GUI apps ignore SIGTERM. Only kill the exact executable we launched
+    # (or the original Superwhisper instance which will be restored below).
+    for pid in pids(path):
+        try: os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+    deadline = time.monotonic() + 5
     while pids(path) and time.monotonic() < deadline: time.sleep(.2)
     if pids(path): raise RuntimeError('Could not quit ' + path)
 def footprint(pid, label):
@@ -52,13 +71,13 @@ def footprint(pid, label):
     return bool(match) and result.returncode == 0
 def idle(pid, label, path):
     footprint_ok = footprint(pid, label)
-    result = run(['top','-l','31','-s','2','-stats','pid,command,cpu,power,idlew,mem'])
+    result = run(['top','-l','31','-s','2','-c','d','-pid',str(pid),'-stats','pid,command,cpu,power,idlew,mem'])
     (out / (label + '-top.txt')).write_text(result.stdout)
     rows = []
     for line in result.stdout.splitlines():
         cols = line.split()
         if len(cols) >= 6 and cols[0] == str(pid):
-            try: rows.append(tuple(float(x) for x in cols[2:5]))
+            try: rows.append((float(cols[2].rstrip('+-')), float(cols[3].rstrip('+-')), float(cols[4].rstrip('+-')) / 2))
             except ValueError: pass
     rows = rows[1:]  # first sample is cumulative since launch
     if footprint_ok and len(rows) == 30 and result.returncode == 0 and pids(path) == [pid]:
@@ -91,8 +110,6 @@ installed_running = bool(pids(installed_path))
 super_running = bool(pids(superpath))
 print('Initially running: installed LightTTS:', installed_running, 'SuperWhisper:', super_running, flush=True)
 aiff, wav = out / 'speech.aiff', out / 'speech.wav'
-if run(['say', '-o', str(aiff), 'This is a local speech recognition test.']).returncode or run(['afconvert', '-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', str(aiff), str(wav)]).returncode:
-    raise RuntimeError('Fixture audio generation failed')
 def interrupted(signum, frame):
     raise SystemExit(128 + signum)
 signal.signal(signal.SIGTERM, interrupted)
@@ -134,6 +151,8 @@ def fixture():
         else: print('Post-transcription footprint: N/A; completion or wait not observed', flush=True)
         terminate(lightpath)
 try:
+    if run(['say', '-o', str(aiff), 'This is a local speech recognition test.']).returncode or run(['afconvert', '-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', str(aiff), str(wav)]).returncode:
+        raise RuntimeError('Fixture audio generation failed')
     try:
         settle(superpath, 'superwhisper', lambda attempt: run(['open', '-a', 'superwhisper']))
         terminate(superpath)
@@ -162,3 +181,7 @@ finally:
 print('Launch to menu: LightTTS trace recorded; SuperWhisper N/A without non-prompting menu observation.', flush=True)
 print('Transcription and stop-to-paste: N/A unless independently measured.', flush=True)
 PY
+
+bench_pid=$!
+wait "$bench_pid"
+bench_pid=""
