@@ -98,10 +98,8 @@ final class FocusTarget: @unchecked Sendable {
         let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate, .maskSecondaryFn]
         let waitStart = ProcessInfo.processInfo.systemUptime
         let deadline = waitStart + 2.0
-        var previousFlags: UInt64?
         while true {
             let flags = CGEventSource.flagsState(.combinedSessionState).intersection(modifiers)
-            if previousFlags != flags.rawValue { Self.trace("modifier flags=\(flags.rawValue)"); previousFlags = flags.rawValue }
             if flags.isEmpty { break }
             guard ProcessInfo.processInfo.systemUptime < deadline else { Self.trace("modifier timeout"); throw FocusError.modifiersHeld }
             Thread.sleep(forTimeInterval: min(0.01, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
@@ -112,35 +110,23 @@ final class FocusTarget: @unchecked Sendable {
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else { throw FocusError.eventCreationFailed }
         keyDown.flags = .maskCommand; keyUp.flags = .maskCommand
-        Self.trace("post keycode=9 flags=command tap=cghid source=hidSystemState")
-        keyDown.post(tap: .cghidEventTap); keyUp.post(tap: .cghidEventTap)
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" {
-            let targetPID = pid
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) {
-                let app = AXUIElementCreateApplication(targetPID)
-                AXUIElementSetMessagingTimeout(app, 0.5)
-                guard !IsSecureEventInputEnabled(), let element = Self.focused(app),
-                      Self.attribute(element, kAXRoleAttribute) as? String != "AXSecureTextField",
-                      Self.attribute(element, kAXSubroleAttribute) as? String != "AXSecureTextField" else {
-                    Self.trace("after150ms AXValue=secure-or-unavailable")
-                    return
-                }
-                let value = Self.attribute(element, kAXValueAttribute)
-                Self.trace("after150ms AXValue=\(value.map { String(describing: $0) } ?? "unreadable")")
-            }
-        }
+        Self.trace("post keycode=9 flags=command tap=annotatedSession source=hidSystemState")
+        keyDown.post(tap: .cgAnnotatedSessionEventTap)
+        Thread.sleep(forTimeInterval: 0.01)
+        keyUp.post(tap: .cgAnnotatedSessionEventTap)
         if restoreClipboard {
-            Thread.sleep(forTimeInterval: 0.4)
-            Self.trace("restore attempt current=\(board.changeCount) expected=\(count)")
-            if board.changeCount == count {
-                let items = saved.map { values -> NSPasteboardItem in
-                    let item = NSPasteboardItem()
-                    for (type, data) in values { item.setData(data, forType: type) }
-                    return item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                Self.trace("restore attempt current=\(board.changeCount) expected=\(count)")
+                if board.changeCount == count {
+                    let items = saved.map { values -> NSPasteboardItem in
+                        let item = NSPasteboardItem()
+                        for (type, data) in values { item.setData(data, forType: type) }
+                        return item
+                    }
+                    board.clearContents()
+                    if !items.isEmpty { board.writeObjects(items) }
+                    Self.trace("restore done count=\(board.changeCount)")
                 }
-                board.clearContents()
-                if !items.isEmpty { board.writeObjects(items) }
-                Self.trace("restore done count=\(board.changeCount)")
             }
         }
     }
