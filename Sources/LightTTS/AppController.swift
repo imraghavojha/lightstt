@@ -23,7 +23,7 @@ import Darwin
     private var warmingID = ""
     private var warmingToken = UUID()
     private var warming: Task<any TranscriptionEngine, Error>?
-    private var audio: AudioCapture?
+    private(set) var audio: AudioCapture?
     private var panel: NSPanel?
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
@@ -75,20 +75,20 @@ import Darwin
         warming?.cancel()
         warmingID = selected; warmingToken = UUID()
         let token = warmingToken
-        let task = Task.detached(priority: .utility) { [weak self] () -> any TranscriptionEngine in
-            try await HelperEngine.load(model) {
-                Task { @MainActor [weak self] in
-                    guard let self, self.warmingToken == token else { return }
-                    self.processing?.cancel()
-                    self.fail("Speech engine exited unexpectedly. Try recording again.")
-                }
+        let onCrash: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.warmingToken == token else { return }
+                self.fail("Speech engine exited unexpectedly. Try recording again.")
             }
+        }
+        let task = Task.detached(priority: .utility) { () -> any TranscriptionEngine in
+            try await HelperEngine.load(model, onCrash: onCrash)
         }
         warming = task
         if state == "idle" || state == "error" { scheduleEngineUnload() }
         Task { [weak self] in
             do { _ = try await task.value }
-            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = "" }
+            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = ""; if !(error is CancellationError) { self.fail(error.localizedDescription) } }
         }
     }
     @discardableResult func installHotkey() -> Bool {
@@ -103,7 +103,7 @@ import Darwin
         _ = CGRequestListenEventAccess()
         installHotkey()
     }
-    private func handleShortcut(_ down: Bool) {
+    func handleShortcut(_ down: Bool) {
         if down && !pressed {
             pressed = true
             if state == "error" { cancel() }
@@ -258,7 +258,12 @@ import Darwin
         RunLoop.main.add(timer, forMode: .common)
         unloadTimer = timer
     }
-    private func fail(_ text: String) { if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }; unloadEngine(); message = text; state = "error"; showPanel() }
+    func fail(_ text: String) {
+        generation += 1; processing?.cancel(); processing = nil
+        _ = audio?.stop(); audio = nil; testAudio = nil; focus = nil; level = 0
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
+        unloadEngine(); message = text; state = "error"; showPanel()
+    }
     private func showPanel() {
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
