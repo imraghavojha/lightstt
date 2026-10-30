@@ -32,15 +32,28 @@ import LightTTSCore
     private func makeStatusImage() -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             let path = NSBezierPath()
-            path.move(to: NSPoint(x: 9, y: 14.25))
-            path.line(to: NSPoint(x: 15, y: 3.25))
-            path.line(to: NSPoint(x: 3, y: 3.25))
+            path.windingRule = .evenOdd
+            // Draw both contours explicitly so the inner corners are rounded too.
+            path.move(to: NSPoint(x: 9, y: 15.75))
+            path.curve(to: NSPoint(x: 7.35, y: 14.55), controlPoint1: NSPoint(x: 8.3, y: 15.75), controlPoint2: NSPoint(x: 7.8, y: 15.35))
+            path.line(to: NSPoint(x: 1.95, y: 4.45))
+            path.curve(to: NSPoint(x: 3.5, y: 2.25), controlPoint1: NSPoint(x: 1.3, y: 3.2), controlPoint2: NSPoint(x: 2.05, y: 2.25))
+            path.line(to: NSPoint(x: 14.5, y: 2.25))
+            path.curve(to: NSPoint(x: 16.05, y: 4.45), controlPoint1: NSPoint(x: 15.95, y: 2.25), controlPoint2: NSPoint(x: 16.7, y: 3.2))
+            path.line(to: NSPoint(x: 10.65, y: 14.55))
+            path.curve(to: NSPoint(x: 9, y: 15.75), controlPoint1: NSPoint(x: 10.2, y: 15.35), controlPoint2: NSPoint(x: 9.7, y: 15.75))
             path.close()
-            path.lineWidth = 2.5
-            path.lineJoinStyle = .round
-            path.lineCapStyle = .round
-            NSColor.black.setStroke()
-            path.stroke()
+            path.move(to: NSPoint(x: 9, y: 11.8))
+            path.curve(to: NSPoint(x: 8.4, y: 11.35), controlPoint1: NSPoint(x: 8.75, y: 11.8), controlPoint2: NSPoint(x: 8.55, y: 11.6))
+            path.line(to: NSPoint(x: 5.3, y: 5.55))
+            path.curve(to: NSPoint(x: 5.85, y: 4.75), controlPoint1: NSPoint(x: 5.05, y: 5.1), controlPoint2: NSPoint(x: 5.3, y: 4.75))
+            path.line(to: NSPoint(x: 12.15, y: 4.75))
+            path.curve(to: NSPoint(x: 12.7, y: 5.55), controlPoint1: NSPoint(x: 12.7, y: 4.75), controlPoint2: NSPoint(x: 12.95, y: 5.1))
+            path.line(to: NSPoint(x: 9.6, y: 11.35))
+            path.curve(to: NSPoint(x: 9, y: 11.8), controlPoint1: NSPoint(x: 9.45, y: 11.6), controlPoint2: NSPoint(x: 9.25, y: 11.8))
+            path.close()
+            NSColor.black.setFill()
+            path.fill()
             return true
         }
         image.isTemplate = true
