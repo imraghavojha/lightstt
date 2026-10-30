@@ -18,7 +18,7 @@ final class FakeMediaController: MediaControlling {
     var resumed: [[String]] = []
     init(_ playing: [String]) { currentlyPlaying = playing }
     func pausePlaying() throws -> [String] { pauseCalls += 1; return currentlyPlaying }
-    func resume(_ players: [String]) { resumed.append(players) }
+    func resume(_ players: [String]) -> [String] { resumed.append(players); return [] }
 }
 let fake = FakeMediaController(["synthetic-player"])
 let pause = MediaPauseSession(controller: fake)
@@ -27,13 +27,13 @@ precondition(fake.pauseCalls == 1 && fake.resumed == [["synthetic-player"]])
 let alreadyPaused = FakeMediaController([])
 let noPlayback = MediaPauseSession(controller: alreadyPaused)
 try noPlayback.begin(); noPlayback.end()
-precondition(alreadyPaused.resumed == [[]])
+precondition(alreadyPaused.resumed.isEmpty)
 print("Media pause lifecycle checks passed")
 enum FakeMediaError: Error { case denied }
 final class DeniedMediaController: MediaControlling {
     var calls = 0
     func pausePlaying() throws -> [String] { calls += 1; throw FakeMediaError.denied }
-    func resume(_ players: [String]) { preconditionFailure("No player was paused") }
+    func resume(_ players: [String]) -> [String] { preconditionFailure("No player was paused") }
 }
 let denied = DeniedMediaController()
 let deniedSession = MediaPauseSession(controller: denied)
@@ -112,11 +112,15 @@ final class FakePlayers: PlayerControlling {
     var unresponsive: Set<String> = []
     var pauses: [String] = []
     var resumes: [String] = []
+    var onState: (() -> Void)?
+    var onPause: (() -> Void)?
     func runningPlayers() -> [String] { Array(states.keys) }
     func authorized(_ player: String) -> Bool { permitted }
-    func state(_ player: String) -> String? { unresponsive.contains(player) ? nil : states[player] }
-    func pause(_ player: String) -> Bool { pauses.append(player); guard !failing.contains(player) else { return false }; states[player] = "paused"; return true }
-    func resume(_ player: String) { resumes.append(player); states[player] = "playing" }
+    func state(_ player: String) -> String? { onState?(); return unresponsive.contains(player) ? nil : states[player] }
+    func pause(_ player: String) -> Bool { pauses.append(player); guard !failing.contains(player) else { return false }; states[player] = "paused"; onPause?(); return true }
+    var invalidated: Set<String> = []
+    func ownershipValid(_ player: String) -> Bool { !invalidated.contains(player) }
+    func resume(_ player: String) -> Bool { resumes.append(player); states[player] = "playing"; return true }
 }
 let players = FakePlayers(), playerGate = MediaGate()
 let playerController = PlayerMediaController(players: players, gate: playerGate)
@@ -161,3 +165,57 @@ let start = Date(); slowGate.stop(); _ = slowGate.start()
 precondition(Date().timeIntervalSince(start) < 0.1)
 release.signal(); done.wait()
 print("Slow player send does not block recording transitions")
+
+// A queued stop can run after the next start; the next stop must restore ownership.
+let consecutivePlayers = FakePlayers(), consecutiveGate = MediaGate()
+consecutivePlayers.states["music"] = "playing"
+let consecutiveSession = MediaPauseSession(controller: PlayerMediaController(players: consecutivePlayers, gate: consecutiveGate))
+let one = consecutiveGate.start(); consecutiveGate.setOperation(one); try consecutiveSession.begin()
+let stoppedOne = consecutiveGate.stop(); let two = consecutiveGate.start()
+consecutiveGate.setOperation(stoppedOne); consecutiveSession.end()
+consecutiveGate.setOperation(two); try consecutiveSession.begin()
+consecutiveGate.stop(); consecutiveSession.end()
+precondition(consecutivePlayers.resumes == ["music"] && consecutivePlayers.states["music"] == "playing")
+
+// A user play/pause invalidates the old claim, even if the final state is paused.
+let changedPlayers = FakePlayers(), changedGate = MediaGate()
+changedPlayers.states["music"] = "playing"
+let changedMediaSession = MediaPauseSession(controller: PlayerMediaController(players: changedPlayers, gate: changedGate))
+let changedOne = changedGate.start(); changedGate.setOperation(changedOne); try changedMediaSession.begin()
+changedGate.stop(); let changedTwo = changedGate.start(); changedMediaSession.end()
+changedPlayers.states["music"] = "playing"; changedPlayers.invalidated.insert("music"); changedPlayers.states["music"] = "paused"
+changedGate.setOperation(changedTwo); try changedMediaSession.begin(); changedGate.stop(); changedMediaSession.end()
+precondition(changedPlayers.resumes.isEmpty && changedPlayers.states["music"] == "paused")
+print("Consecutive sessions preserve ownership and respect user changes")
+
+// Transitions can occur while an Automation state query or pause reply is in flight.
+for duringPause in [false, true] {
+    let delayedPlayers = FakePlayers(), delayedGate = MediaGate()
+    delayedPlayers.states["music"] = "playing"
+    let delayedSession = MediaPauseSession(controller: PlayerMediaController(players: delayedPlayers, gate: delayedGate))
+    let first = delayedGate.start(); delayedGate.setOperation(first)
+    var second = 0
+    if duringPause {
+        delayedPlayers.onPause = { delayedPlayers.onPause = nil; delayedGate.stop(); second = delayedGate.start() }
+        try delayedSession.begin()
+        delayedSession.end()
+    } else {
+        try delayedSession.begin(); delayedGate.stop()
+        delayedPlayers.onState = { delayedPlayers.onState = nil; second = delayedGate.start() }
+        delayedSession.end()
+    }
+    delayedGate.setOperation(second); try delayedSession.begin(); delayedGate.stop(); delayedSession.end()
+    precondition(delayedPlayers.resumes == ["music"] && delayedPlayers.states["music"] == "playing")
+}
+print("Slow Automation replies preserve pause ownership")
+
+let playerIntent = PlayerIntentTracker(), musicIdentity = "com.apple.Music|123|1"
+playerIntent.begin(musicIdentity)
+playerIntent.playbackChanged(bundle: "com.apple.Music", state: "playing") // Queued update preceding our pause.
+playerIntent.playbackChanged(bundle: "com.apple.Music", state: "paused")
+playerIntent.playbackChanged(bundle: "com.apple.Music", state: "paused") // Duplicate player metadata.
+precondition(playerIntent.valid(musicIdentity))
+playerIntent.playbackChanged(bundle: "com.apple.Music", state: "playing")
+playerIntent.playbackChanged(bundle: "com.apple.Music", state: "paused")
+precondition(!playerIntent.valid(musicIdentity))
+print("Player notifications distinguish queued updates from user changes")

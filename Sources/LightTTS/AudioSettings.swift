@@ -109,8 +109,8 @@ final class AudioSettings: @unchecked Sendable {
         }
     }
     func end() {
-        gate.stop()
-        sessionQueue.async { [self] in endSession() }
+        let token = gate.stop()
+        sessionQueue.async { [self] in gate.setOperation(token); endSession() }
     }
     private func endSession() {
         volumeQueue.async { [self] in
@@ -138,7 +138,6 @@ private final class SystemMediaController: MediaControlling {
     let gate: MediaGate
     private let intent = MediaIntentTracker()
     private lazy var playerFallback = PlayerMediaController(players: SystemPlayerController(), gate: gate)
-    private var usedFallback = false
     private var observers: [NSObjectProtocol] = []
     private static let framework = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
     private typealias IsPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (Bool) -> Void) -> Void
@@ -202,8 +201,7 @@ private final class SystemMediaController: MediaControlling {
     }
     func pausePlaying() throws -> [String] {
         let bundle = target()
-        if bundle == nil || !SystemPlayerController().runningPlayers().isEmpty { usedFallback = true; return try playerFallback.pausePlaying() }
-        usedFallback = false
+        if bundle == nil || !SystemPlayerController().runningPlayers().isEmpty { return try playerFallback.pausePlaying() }
         let playing = isPlaying()
         let identity = bundle.flatMap { processIdentity($0) }
         trace("pause target=\(bundle ?? "nil") identity=\(identity?.joined(separator: "/") ?? "nil") playing=\(String(describing: playing))")
@@ -214,15 +212,20 @@ private final class SystemMediaController: MediaControlling {
         trace("pause sent")
         return identity
     }
-    func resume(_ players: [String]) {
-        if usedFallback { usedFallback = false; playerFallback.resume(players); return }
-        guard players.count == 3, let identity = players.first else { intent.cancel(); return }
+    func resume(_ players: [String]) -> [String] {
+        guard !players.isEmpty else { return [] }
+        if players[0].contains("|") { return playerFallback.resume(players) }
+        guard players.count == 3, let identity = players.first else { intent.cancel(); return [] }
         // MediaRemote may report the old playing state briefly after a pause.
         Thread.sleep(forTimeInterval: 0.2)
         let stopped = gate.ifStopped { true }, bundle = target(), process = processIdentity(identity), playing = isPlaying()
         trace("resume stopped=\(stopped) target=\(bundle ?? "nil") identity=\(process?.joined(separator: "/") ?? "nil") playing=\(String(describing: playing))")
-        guard stopped, bundle == identity, process == players, playing == false, target() == identity, processIdentity(identity) == players else { intent.cancel(); trace("resume skipped"); return }
-        trace("resume sent=\(intent.finish { gate.ifStopped { send(0) } })")
+        guard stopped else { return players }
+        guard bundle == identity, process == players, playing == false, target() == identity, processIdentity(identity) == players else { intent.cancel(); trace("resume skipped"); return [] }
+        var sent = false
+        _ = intent.finish { guard gate.operationIsStopped() else { return false }; sent = send(0); return sent }
+        trace("resume sent=\(sent)")
+        return !sent && intent.isValid() ? players : []
     }
 }
 
@@ -242,7 +245,20 @@ enum AutomationPlayers {
 }
 extension Notification.Name { static let automationPermissionChanged = Notification.Name("LightTTSAutomationPermissionChanged") }
 
-private struct SystemPlayerController: PlayerControlling {
+private final class SystemPlayerController: PlayerControlling {
+    private let intent = PlayerIntentTracker()
+    private var observers: [NSObjectProtocol] = []
+    init() {
+        for (name, bundle) in [("com.apple.Music.playerInfo", "com.apple.Music"), ("com.spotify.client.PlaybackStateChanged", "com.spotify.client")] {
+            observers.append(DistributedNotificationCenter.default().addObserver(forName: Notification.Name(name), object: nil, queue: nil) { [weak self] notification in
+                guard let state = notification.userInfo?["Player State"] as? String else { return }
+                self?.playbackChanged(bundle: bundle, state: state.lowercased())
+            })
+        }
+    }
+    deinit { for observer in observers { DistributedNotificationCenter.default().removeObserver(observer) } }
+    private func playbackChanged(bundle: String, state: String) { intent.playbackChanged(bundle: bundle, state: state) }
+    func ownershipValid(_ player: String) -> Bool { intent.valid(player) }
     func runningPlayers() -> [String] {
         AutomationPlayers.supported.flatMap { _, bundle in
             NSRunningApplication.runningApplications(withBundleIdentifier: bundle).compactMap { app in
@@ -289,8 +305,13 @@ private struct SystemPlayerController: PlayerControlling {
         default: return nil
         }
     }
-    func pause(_ player: String) -> Bool { send(eventClass(player), "Paus", player: player) != nil }
-    func resume(_ player: String) { _ = send(eventClass(player), "Play", player: player) }
+    func pause(_ player: String) -> Bool {
+        intent.begin(player)
+        let sent = send(eventClass(player), "Paus", player: player) != nil
+        if !sent { intent.cancel(player) }
+        return sent
+    }
+    func resume(_ player: String) -> Bool { send(eventClass(player), "Play", player: player) != nil }
     private func eventClass(_ player: String) -> String { bundle(player) == "com.spotify.client" ? "spfy" : "hook" }
 }
 
