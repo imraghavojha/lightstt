@@ -99,7 +99,7 @@ struct LibraryPageView: View {
                     }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
                     action("doc.on.doc.fill", "Copy") { copy(item) }
-                    Button {} label: { Image(systemName: "sparkle") .overlay(Circle().stroke(lineWidth: 1).frame(width: 12, height: 12)) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
+                    Button {} label: { Image(systemName: "arrow.clockwise").overlay(Image(systemName: "sparkle").font(.system(size: 6)), alignment: .center).frame(width: 24, height: 24) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
                     action("info.circle", "Recording information") { state.drawer = true }
                     action("trash", "Delete") { controller.deleteHistory(item.id); controller.selectedHistory = nil }
                 }.font(.system(size: 12))
@@ -138,7 +138,7 @@ struct LibraryPageView: View {
         }.padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
     private func segmentButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).frame(maxWidth: .infinity).frame(height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)) }.buttonStyle(.plain)
+        Button(action: action) { Text(title).font(.system(size: 11, weight: selected ? .semibold : .regular)).frame(width: title == "Original" ? 60 : 78, height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)).shadow(color: selected ? .black.opacity(0.12) : .clear, radius: 1, y: 1) }.buttonStyle(.plain)
     }
     private func action(_ icon: String, _ help: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) { Image(systemName: icon).frame(width: 24, height: 24) }.buttonStyle(.plain).help(help)
