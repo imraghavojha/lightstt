@@ -127,10 +127,10 @@ private struct SoundPageView: View {
             SettingsCard {
                 SettingsRow(title: "Sound while recording", contentOffset: 5) {
                     Menu {
-                        ForEach(["Keep Playing", "Pause", "Mute", "Lower", "Muffle"], id: \.self) { value in Button(value == "Pause" ? "Pause (Unavailable)" : value) { recordingSound = value }.disabled(value == "Pause") }
+                        ForEach(["Keep Playing", "Pause", "Mute", "Lower"], id: \.self) { value in Button(value) { recordingSound = value } }
                     } label: {
                         HStack(spacing: 8) { Image(systemName: recordingSound == "Pause" ? "pause.circle" : recordingSound == "Mute" ? "speaker.slash" : "speaker.wave.2"); Text(recordingSound); Spacer(); Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)) }.padding(.horizontal, 9)
-                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause is unavailable and leaves playback unchanged; Muffle lowers volume if system audio capture is unavailable.")
+                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 145, height: 30).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))).overlay(alignment: .trailing) { Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(.secondary).padding(.trailing, 9).allowsHitTesting(false) }.help("Pause playing media or reduce output volume while recording.")
                 }
                 PageRule()
                 HStack { Text("Automatically increase microphone volume"); Image(systemName: "questionmark.circle").help("Increase input volume while recording"); Spacer(); Toggle("", isOn: $increaseMic).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically increase microphone volume")) }.offset(y: -2).frame(minHeight: 44)
@@ -179,8 +179,9 @@ private struct ConfigurationPageView: View {
     @AppStorage("removeSilence") private var removeSilence = false
     @AppStorage("normalizeAudio") private var normalizeAudio = false
     @AppStorage("historyRetentionDays") private var retention = 0
-    @AppStorage("autoCheckUpdates") private var autoCheckUpdates = false
     @AppStorage("recordOnMenubarClick") private var recordOnMenubarClick = false
+    @AppStorage("closeAfterTranscription") private var closeAfterTranscription = false
+    @AppStorage("clipboardHistory") private var clipboardHistory = true
     var body: some View {
         Group { if controller.showAdvanced { advancedPage } else { configurationPage } }
             .onAppear { controller.refreshLoginStatus() }
@@ -205,8 +206,6 @@ private struct ConfigurationPageView: View {
             }
             Text("Application").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 9)
             SettingsCard {
-                ConfigurationApplicationRow(title: "Update application") { Button("Check for Updates…") { controller.checkUpdates() } }; PageRule()
-                ConfigurationApplicationRow(title: "Automatically check for updates", help: "Check for new releases automatically") { Toggle("", isOn: $autoCheckUpdates).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Automatically check for updates")) }; PageRule()
                 ConfigurationApplicationRow(title: "Launch on login", help: "Open LightTTS when you log in") { Toggle("", isOn: Binding(get: { controller.loginEnabled }, set: { controller.setLoginEnabled($0) })).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Launch on login")) }; PageRule()
                 ConfigurationApplicationRow(title: "Keep recordings for", help: "Automatically remove older recordings") { RetentionPopup(selection: retentionBinding) }
             }
@@ -223,9 +222,8 @@ private struct ConfigurationPageView: View {
             ScrollView { VStack(alignment: .leading, spacing: 0) {
                 advancedHeading("Application")
                 SettingsCard {
-                    unavailableRow("Show in Dock"); PageRule()
                     ConfigurationApplicationRow(title: "Start Recording on Menubar Click") { Toggle("", isOn: $recordOnMenubarClick).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Start Recording on Menubar Click")) }; PageRule()
-                    unavailableRow("Close after transcription")
+                    ConfigurationApplicationRow(title: "Close after transcription") { Toggle("", isOn: $closeAfterTranscription).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Close after transcription")) }
                 }
                 advancedHeading("Voice model")
                 SettingsCard { ConfigurationApplicationRow(title: "Voice model active duration", help: "Unload the voice model after this period of inactivity") { NeutralSettingsPopup(selection: $modelIdleTimeout, options: [(60, "1 minute"), (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"), (1800, "30 minutes")], width: 125).frame(width: 125, height: 28).onChange(of: modelIdleTimeout) { _ in controller.refreshModelIdleTimeout() } } }
@@ -251,7 +249,7 @@ private struct ConfigurationPageView: View {
                     ConfigurationApplicationRow(title: "Clipboard content", help: "Choose whether to restore the previous clipboard contents") {
                         NeutralSettingsPopup(selection: Binding(get: { restoreClipboard ? 1 : 0 }, set: { restoreClipboard = $0 == 1 }), options: [(0, "Keep result"), (1, "Restore previous")], width: 145).frame(width: 145, height: 28)
                     }; PageRule()
-                    unavailableRow("Clipboard history"); PageRule()
+                    ConfigurationApplicationRow(title: "Clipboard history", help: "Allow clipboard managers to save transcripts") { Toggle("", isOn: $clipboardHistory).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Clipboard history")) }; PageRule()
                     ConfigurationApplicationRow(title: "Paste result text", help: "Paste the transcription into the focused app") { Toggle("", isOn: $pasteResult).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Paste result text")) }; PageRule()
                     ConfigurationApplicationRow(title: "Hold shift to auto-send after paste", help: "Send Return when Shift is held") { Toggle("", isOn: $sendOnShift).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Hold shift to auto-send after paste")) }; PageRule()
                     ConfigurationApplicationRow(title: "Simulate keypresses", help: "Type the result instead of pasting it") { Toggle("", isOn: $simulateTyping).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: "Simulate keypresses")) }
@@ -260,9 +258,6 @@ private struct ConfigurationPageView: View {
         }
     }
     private func advancedHeading(_ title: String) -> some View { Text(title).font(.system(size: 13, weight: .semibold)).padding(.top, title == "Application" ? 14 : 22).padding(.bottom, 9) }
-    private func unavailableRow(_ title: String) -> some View {
-        ConfigurationApplicationRow(title: title, help: "Not available in LightTTS") { Toggle("", isOn: .constant(false)).labelsHidden().toggleStyle(ReferenceSwitchStyle(label: title)).disabled(true) }
-    }
     private var retentionLabel: String { [0: "Forever", 1: "1 day", 7: "1 week", 14: "2 weeks", 30: "1 month", 180: "6 months", 365: "1 year"][retention] ?? "Forever" }
     private var retentionBinding: Binding<Int> {
         Binding(get: { retention }, set: { value in

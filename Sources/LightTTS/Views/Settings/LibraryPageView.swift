@@ -99,10 +99,11 @@ struct LibraryPageView: View {
                     }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
                     action("doc.on.doc.fill", "Copy") { copy(item) }
-                    Button {} label: { Image(systemName: "gobackward").overlay(Image(systemName: "sparkle").font(.system(size: 6)).offset(y: -1), alignment: .center).frame(width: 24, height: 24) }.buttonStyle(.plain).disabled(true).help("Process again is not available")
+                    Button { controller.processHistoryAgain(item) } label: { if controller.reprocessingHistoryID == item.id { ProgressView().controlSize(.small).frame(width: 24, height: 24) } else { Image(systemName: "gobackward").overlay(Image(systemName: "sparkle").font(.system(size: 6)).offset(y: -1), alignment: .center).frame(width: 24, height: 24) } }.buttonStyle(.plain).disabled(controller.historyAudioURL(item) == nil || controller.reprocessingHistoryID != nil || controller.historyMigration != nil).help(controller.historyAudioURL(item) == nil ? "Recording audio is unavailable" : "Process again")
                     action("info.circle", "Recording information") { state.drawer = true }
                     action("trash", "Delete") { controller.deleteHistory(item.id); controller.selectedHistory = nil }
                 }.font(.system(size: 12))
+                if let error = controller.historyProcessingError, error.id == item.id { Text(error.message).font(.caption).foregroundStyle(.red) }
                 if controller.historySegmented, let segments = item.segments {
                     ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                         Button { controller.toggleHistoryPlayback(item, segment: segment) } label: {
@@ -191,7 +192,7 @@ struct LibraryPageView: View {
         }.frame(width: 20, height: 20)
     }
     private func duration(_ value: Double) -> String { let seconds = max(0, Int(value)); return String(format: "%d:%02d", seconds / 60, seconds % 60) }
-    private func copy(_ item: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(item.text, forType: .string) }
+    private func copy(_ item: HistoryEntry) { writeTranscriptToClipboard(item.text) }
 }
 private struct HistoryGroup: Identifiable { let date: Date; let entries: [HistoryEntry]; var id: Date { date } }
 
