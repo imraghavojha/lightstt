@@ -1,6 +1,7 @@
 import AppKit
 import CoreAudio
 import AudioToolbox
+import LightTTSRuntime
 
 final class AudioSettings: @unchecked Sendable {
     private let gate = MediaGate()
@@ -61,19 +62,29 @@ final class AudioSettings: @unchecked Sendable {
         _ = AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
     }
     func begin(completion: @escaping @Sendable (String?) -> Void) {
+        begin(options: nil, completion: completion)
+    }
+    func begin(options: DuckingOptions?, completion: @escaping @Sendable (String?) -> Void) {
         let token = gate.start()
         sessionQueue.async { [self] in
             guard gate.isCurrent(token) else { return }
             gate.setOperation(token)
-            let warning = beginSession()
+            let warning = beginSession(options: options)
             if !gate.isCurrent(token) { endSession() } else { completion(warning) }
         }
     }
-    private func beginSession() -> String? {
+    private func beginSession(options: DuckingOptions?) -> String? {
         let defaults = UserDefaults.standard
         let testAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
-        if !testAudio, defaults.bool(forKey: "increaseMicVolume"), let input = Self.device(for: defaults.string(forKey: "inputDeviceUID") ?? "", scope: kAudioDevicePropertyScopeInput) { _ = Self.volume(input, scope: kAudioDevicePropertyScopeInput, set: 1) }
-        let mode = defaults.string(forKey: "recordingSound") ?? "Pause"
+        if !testAudio, options?.increaseMicrophoneVolume ?? defaults.bool(forKey: "increaseMicVolume"), let input = Self.device(for: defaults.string(forKey: "inputDeviceUID") ?? "", scope: kAudioDevicePropertyScopeInput) { _ = Self.volume(input, scope: kAudioDevicePropertyScopeInput, set: 1) }
+        let mode: String
+        switch options?.mode {
+        case .pause: mode = "Pause"
+        case .mute: mode = "Mute"
+        case .lower: mode = "Lower"
+        case .none?: mode = "None"
+        case nil: mode = defaults.string(forKey: "recordingSound") ?? "Pause"
+        }
         if mode == "Pause" {
             do { try pauseSession.begin() }
             catch {
