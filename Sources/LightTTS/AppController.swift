@@ -83,8 +83,10 @@ import Darwin
                 self.fail("Speech engine exited unexpectedly. Try recording again.")
             }
         }
+        let languageID = model.fallbackID ?? model.id
+        let language = UserDefaults.standard.string(forKey: "canaryLanguage." + languageID) ?? "en"
         let task = Task.detached(priority: .utility) { () -> any TranscriptionEngine in
-            try await HelperEngine.load(model, onCrash: onCrash)
+            try await HelperEngine.load(model, language: language, onCrash: onCrash)
         }
         warming = task
         if state == "idle" || state == "error" { scheduleEngineUnload() }
@@ -184,7 +186,7 @@ import Darwin
                     let resolved: any TranscriptionEngine
                     do {
                         if warmingID == selected, let warming { resolved = try await warming.value }
-                        else { resolved = try await HelperEngine.load(model) }
+                        else { let language = UserDefaults.standard.string(forKey: "canaryLanguage." + (model.fallbackID ?? model.id)) ?? "en"; resolved = try await HelperEngine.load(model, language: language) }
                     } catch { if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }; throw error }
                     if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }
                     try Task.checkCancellation(); guard current == generation else { return }

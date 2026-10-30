@@ -17,10 +17,11 @@ public struct CloudUnavailable: LocalizedError, Sendable {
 public actor CloudFallbackEngine: TranscriptionEngine {
     private let cloud: CloudEngine
     private let local: Model
-    public init(cloud: CloudEngine, local: Model) { self.cloud = cloud; self.local = local }
+    private let canaryLanguage: String
+    public init(cloud: CloudEngine, local: Model, canaryLanguage: String = "en") { self.cloud = cloud; self.local = local; self.canaryLanguage = canaryLanguage }
     public func transcribe(samples: [Float]) async throws -> String {
         do { return try await cloud.transcribe(samples: samples) }
-        catch is CloudUnavailable { return try await InferenceFactory.engine(for: local).transcribe(samples: samples) }
+        catch is CloudUnavailable { return try await InferenceFactory.engine(for: local, canaryLanguage: canaryLanguage).transcribe(samples: samples) }
     }
 }
 public actor CloudEngine: TranscriptionEngine {

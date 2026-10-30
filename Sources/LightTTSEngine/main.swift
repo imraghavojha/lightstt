@@ -41,10 +41,10 @@ import LightTTSInference
                     if ProcessInfo.processInfo.environment["LIGHTTTS_MOCK_CLOUD"] == "1", model.engine == "cloud" {
                         let config = URLSessionConfiguration.ephemeral
                         config.protocolClasses = [HelperMockCloudProtocol.self]
-                        engine = try await InferenceFactory.engine(for: model, cloudKey: "unit-test-key", cloudSession: URLSession(configuration: config))
-                    } else { engine = try await InferenceFactory.engine(for: model) }
+                        engine = try await InferenceFactory.engine(for: model, cloudKey: "unit-test-key", cloudSession: URLSession(configuration: config), canaryLanguage: command.language ?? "en")
+                    } else { engine = try await InferenceFactory.engine(for: model, canaryLanguage: command.language ?? "en") }
                     #else
-                    engine = try await InferenceFactory.engine(for: model)
+                    engine = try await InferenceFactory.engine(for: model, canaryLanguage: command.language ?? "en")
                     #endif
                 case "transcribe":
                     guard let engine, let path = command.audio else { throw SpeechError.model("Engine is not ready") }
@@ -59,5 +59,5 @@ import LightTTSInference
         }
     }
 }
-struct Command: Codable { let action: String; let reply: String; var model: Model?; var audio: String? }
+struct Command: Codable { let action: String; let reply: String; var model: Model?; var audio: String?; var language: String? }
 struct Reply: Codable { var text: String?; var error: String? }

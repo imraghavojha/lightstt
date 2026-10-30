@@ -54,8 +54,6 @@ public enum ModelStore {
     public static func delete(_ model: Model) throws { if model.engine == "cloud" { try CloudKeychain.remove(id: model.id); return }; if model.engine == "apple" { try? FileManager.default.removeItem(at: directory.appendingPathComponent(".apple-speech-installed")); return }; try FileManager.default.removeItem(at: path(model)) }
     public static func download(_ model: Model, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        if ["apple", "canary", "parakeet"].contains(model.engine) { try await HelperDownload.run(model); progress(1); return }
-
         if model.engine == "sherpa" || (model.id.hasPrefix("custom-") && model.files != nil) {
             guard let files = model.files, !files.isEmpty else { throw SpeechError.model("Model files missing") }
             let stage = directory.appendingPathComponent(".stage-" + UUID().uuidString, isDirectory: true)
@@ -77,6 +75,8 @@ public enum ModelStore {
             try replaceDirectory(stage, destination: path(model)) { exists(model) }
             return
         }
+
+        if ["apple", "canary", "parakeet"].contains(model.engine) { try await HelperDownload.run(model); progress(1); return }
 
         guard let url = model.url, url.scheme?.lowercased() == "https", let hash = model.sha256, hash.count == 64, hash.allSatisfy({ $0.isHexDigit }) else { throw SpeechError.model("An HTTPS URL and SHA-256 are required") }
         let staged = try await ModelDownload(resumeURL: directory.appendingPathComponent(".resume-" + model.id), progress: progress).run(url: url)
