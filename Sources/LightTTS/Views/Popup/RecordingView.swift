@@ -24,7 +24,7 @@ struct RecordingView: View {
         }
         .frame(width: idle ? 45 : 60, height: idle ? 8 : 32)
         .background(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255), in: Capsule())
-        .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 0.5))
+        .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 1))
         .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)
         .offset(y: idle ? 0 : -9.5)
         .animation(.easeOut(duration: 0.15), value: idle)
