@@ -75,7 +75,15 @@ import Darwin
         warming?.cancel()
         warmingID = selected; warmingToken = UUID()
         let token = warmingToken
-        let task = Task.detached(priority: .utility) { () -> any TranscriptionEngine in try await HelperEngine.load(model) }
+        let task = Task.detached(priority: .utility) { [weak self] () -> any TranscriptionEngine in
+            try await HelperEngine.load(model) {
+                Task { @MainActor [weak self] in
+                    guard let self, self.warmingToken == token else { return }
+                    self.processing?.cancel()
+                    self.fail("Speech engine exited unexpectedly. Try recording again.")
+                }
+            }
+        }
         warming = task
         if state == "idle" || state == "error" { scheduleEngineUnload() }
         Task { [weak self] in
