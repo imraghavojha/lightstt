@@ -10,7 +10,6 @@ struct SettingsView: View {
     var detach: () -> Void
     var attached: Bool
     @StateObject private var dialog = SettingsDialogState()
-    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("selectedModel") private var selectedModel = "whisper-tiny.en"
     @AppStorage("pushToTalk") private var pushToTalk = false
     @AppStorage("rightOption") private var rightOption = false
@@ -53,73 +52,18 @@ struct SettingsView: View {
                 Spacer()
             }.padding(controller.settingsSelection == "Models" ? 0 : 16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }.frame(width: 650, height: 440)
-        .overlay {
-            if let model = dialog.deleting {
-                ZStack {
-                    Color.black.opacity(colorScheme == .dark ? 0.48 : 0.50).ignoresSafeArea()
-                        .background(TitlebarDimmer(opacity: colorScheme == .dark ? 0.48 : 0.50))
-                    VStack(alignment: .leading, spacing: 11) {
-                        Text("Delete \(alertName(model))").font(.system(size: 13, weight: .bold))
-                        Text(model.engine == "apple" ? "LightTTS will forget this selection; macOS manages the speech assets." : model.engine == "cloud" ? "The model and its API key will be removed." : "Are you sure you want to delete this model?").font(.system(size: 13)).foregroundStyle(.secondary)
-                        HStack(spacing: 8) {
-                            Button("Cancel") { dialog.deleting = nil }.keyboardShortcut(.cancelAction).buttonStyle(AlertButton(destructive: false))
-                            Button("Delete", role: .destructive) { do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }; dialog.deleting = nil }.buttonStyle(AlertButton(destructive: true))
-                        }
-                    }.padding(20).frame(width: 260).background(colorScheme == .dark ? Color(red: 18/255, green: 19/255, blue: 23/255) : Color(red: 179/255, green: 180/255, blue: 184/255), in: RoundedRectangle(cornerRadius: 34)).shadow(radius: 18).offset(y: -14)
-                }
+        .alert("Delete \(dialog.deleting.map(alertName) ?? "model")", isPresented: Binding(
+            get: { dialog.deleting != nil },
+            set: { if !$0 { dialog.deleting = nil } }
+        ), presenting: dialog.deleting) { model in
+            Button("Cancel", role: .cancel) { dialog.deleting = nil }
+            Button("Delete", role: .destructive) {
+                do { try controller.deleteModel(model) } catch { controller.message = error.localizedDescription }
+                dialog.deleting = nil
             }
-        }.onChange(of: selectedModel) { _ in controller.warmSelected() }
-    }
-}
-
-// The native title bar lies outside the SwiftUI content view. Add a non-interactive
-// sibling in the window frame while the confirmation is visible so it dims too.
-private struct TitlebarDimmer: NSViewRepresentable {
-    let opacity: Double
-    func makeNSView(context: Context) -> Anchor { Anchor() }
-    func updateNSView(_ view: Anchor, context: Context) { view.opacity = opacity; view.install() }
-    static func dismantleNSView(_ view: Anchor, coordinator: ()) { view.removeDimmer() }
-
-    final class Anchor: NSView {
-        var opacity = 0.5
-        private var dimmer: Dimmer?
-        private var buttonDimmers: [Dimmer] = []
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); install() }
-        func install() {
-            guard let window, let content = window.contentView, let frame = content.superview else { removeDimmer(); return }
-            if buttonDimmers.isEmpty {
-                for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                    guard let button = window.standardWindowButton(type) else { continue }
-                    let shade = Dimmer(frame: button.bounds)
-                    shade.wantsLayer = true
-                    shade.layer?.backgroundColor = NSColor.black.withAlphaComponent(opacity).cgColor
-                    shade.layer?.cornerRadius = min(button.bounds.width, button.bounds.height) / 2
-                    shade.layer?.masksToBounds = true
-                    shade.autoresizingMask = [.width, .height]
-                    button.addSubview(shade)
-                    buttonDimmers.append(shade)
-                }
-            }
-            let overlay = dimmer ?? Dimmer()
-            overlay.wantsLayer = true
-            overlay.layer?.backgroundColor = NSColor.black.withAlphaComponent(opacity).cgColor
-            overlay.frame = NSRect(x: 0, y: content.frame.maxY, width: frame.bounds.width, height: max(0, frame.bounds.height - content.frame.maxY))
-            overlay.autoresizingMask = [.width, .minYMargin]
-            if overlay.superview !== frame { overlay.removeFromSuperview(); frame.addSubview(overlay, positioned: .above, relativeTo: nil) }
-            dimmer = overlay
+        } message: { model in
+            Text(model.engine == "apple" ? "LightTTS will forget this selection; macOS manages the speech assets." : model.engine == "cloud" ? "The model and its API key will be removed." : "Are you sure you want to delete this model?")
         }
-        func removeDimmer() { dimmer?.removeFromSuperview(); dimmer = nil; for shade in buttonDimmers { shade.removeFromSuperview() }; buttonDimmers = [] }
-        deinit { removeDimmer() }
-    }
-    final class Dimmer: NSView {
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    }
-}
-
-private struct AlertButton: ButtonStyle {
-    let destructive: Bool
-    @Environment(\.colorScheme) private var colorScheme
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 13, weight: .semibold)).foregroundStyle(destructive ? Color.red : Color.primary).frame(maxWidth: .infinity).frame(height: 28).background(destructive ? (colorScheme == .dark ? Color(red: 37/255, green: 21/255, blue: 22/255) : Color.red.opacity(configuration.isPressed ? 0.3 : 0.14)) : Color.primary.opacity(configuration.isPressed ? 0.2 : 0.12), in: Capsule())
+        .onChange(of: selectedModel) { _ in controller.warmSelected() }
     }
 }
