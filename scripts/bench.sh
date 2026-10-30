@@ -71,13 +71,13 @@ def footprint(pid, label):
     return bool(match) and result.returncode == 0
 def idle(pid, label, path):
     footprint_ok = footprint(pid, label)
-    result = run(['top','-l','31','-s','2','-pid',str(pid),'-stats','pid,command,cpu,power,idlew,mem'])
+    result = run(['top','-l','31','-s','2','-c','d','-pid',str(pid),'-stats','pid,command,cpu,power,idlew,mem'])
     (out / (label + '-top.txt')).write_text(result.stdout)
     rows = []
     for line in result.stdout.splitlines():
         cols = line.split()
         if len(cols) >= 6 and cols[0] == str(pid):
-            try: rows.append(tuple(float(x) for x in cols[2:5]))
+            try: rows.append((float(cols[2].rstrip('+-')), float(cols[3].rstrip('+-')), float(cols[4].rstrip('+-')) / 2))
             except ValueError: pass
     rows = rows[1:]  # first sample is cumulative since launch
     if footprint_ok and len(rows) == 30 and result.returncode == 0 and pids(path) == [pid]:
