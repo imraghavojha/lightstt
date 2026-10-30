@@ -89,8 +89,9 @@ private struct ReferenceSwitchStyle: ToggleStyle {
 private struct SettingsRow<Content: View>: View {
     let title: String
     var help: String? = nil
+    var height: CGFloat = 48
     @ViewBuilder var content: Content
-    var body: some View { HStack(spacing: 8) { Text(title).lineLimit(1).fixedSize(horizontal: true, vertical: false); if let help { Image(systemName: "info.circle").help(help) }; Spacer(); content }.frame(minHeight: 48) }
+    var body: some View { HStack(spacing: 8) { Text(title).lineLimit(1).fixedSize(horizontal: true, vertical: false); if let help { Image(systemName: "info.circle").help(help) }; Spacer(); content }.frame(minHeight: height) }
 }
 private struct SoundPageView: View {
     @ObservedObject var controller: AppController
@@ -102,11 +103,11 @@ private struct SoundPageView: View {
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 0) {
             SettingsCard {
-                SettingsRow(title: "Sound effects") { HStack(spacing: 0) { ForEach(["Simple", "Classic", "Off"], id: \.self) { value in Button { sound = value } label: { Text(value).font(.system(size: 12, weight: sound == value ? .semibold : .regular)).frame(width: value == "Classic" ? 62 : value == "Simple" ? 62 : 40, height: 24).foregroundStyle(sound == value ? (scheme == .dark ? Color.white : Color.black) : Color.secondary).background(sound == value ? (scheme == .dark ? Color(red: 91/255, green: 93/255, blue: 99/255) : Color.white) : Color.clear, in: RoundedRectangle(cornerRadius: 7)).overlay(RoundedRectangle(cornerRadius: 7).stroke(sound == value ? Color.primary.opacity(0.12) : .clear, lineWidth: 0.5)).shadow(color: sound == value ? .black.opacity(0.12) : .clear, radius: 1, y: 0.5) }.buttonStyle(.plain) } }.padding(2).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))) }
+                SettingsRow(title: "Sound effects", height: 54) { HStack(spacing: 0) { ForEach(["Simple", "Classic", "Off"], id: \.self) { value in Button { sound = value } label: { Text(value).font(.system(size: 12, weight: sound == value ? .semibold : .regular)).frame(width: value == "Classic" ? 62 : value == "Simple" ? 62 : 40, height: 24).foregroundStyle(sound == value ? (scheme == .dark ? Color.white : Color.black) : Color.secondary).background(sound == value ? (scheme == .dark ? Color(red: 91/255, green: 93/255, blue: 99/255) : Color.white) : Color.clear, in: RoundedRectangle(cornerRadius: 7)).overlay(RoundedRectangle(cornerRadius: 7).stroke(sound == value ? Color.primary.opacity(0.12) : .clear, lineWidth: 0.5)).shadow(color: sound == value ? .black.opacity(0.12) : .clear, radius: 1, y: 0.5) }.buttonStyle(.plain) } }.padding(2).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1))) }
                 PageRule()
-                SettingsRow(title: "Volume") { Button { playSound(start: true) } label: { Image(systemName: "speaker.fill") }.buttonStyle(.plain); SoundVolumeSlider(value: $volume, dark: scheme == .dark); Button { playSound(start: false) } label: { Image(systemName: "speaker.wave.2.fill") }.buttonStyle(.plain) }
+                SettingsRow(title: "Volume", height: 42) { Button { playSound(start: true) } label: { Image(systemName: "speaker.fill") }.buttonStyle(.plain); SoundVolumeSlider(value: $volume, dark: scheme == .dark); Button { playSound(start: false) } label: { Image(systemName: "speaker.wave.2.fill") }.buttonStyle(.plain) }
             }
-            Text("Recording").font(.system(size: 13, weight: .semibold)).padding(.top, 18).padding(.bottom, 12.5)
+            Text("Recording").font(.system(size: 13, weight: .semibold)).padding(.top, 22).padding(.bottom, 8.5)
             SettingsCard {
                 SettingsRow(title: "Sound while recording") {
                     Menu {
