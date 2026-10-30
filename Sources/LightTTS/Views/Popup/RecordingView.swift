@@ -16,7 +16,7 @@ struct RecordingView: View {
                     }
                 }.offset(x: -1)
             } else if controller.state == "processing" {
-                ProgressView().controlSize(.mini).environment(\.colorScheme, .dark)
+                Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
             } else if controller.state == "done" {
                 Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
             } else if controller.state == "error" {

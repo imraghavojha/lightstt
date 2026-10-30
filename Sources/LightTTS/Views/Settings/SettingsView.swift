@@ -174,7 +174,7 @@ private struct ConfigurationPageView: View {
     @Environment(\.colorScheme) private var scheme
     @ObservedObject var controller: AppController
     @AppStorage("theme") private var theme = "Auto"
-    @AppStorage("modelIdleTimeoutSeconds") private var modelIdleTimeout = 120
+    @AppStorage("modelIdleTimeoutSeconds") private var modelIdleTimeout = 300
     @AppStorage("historyFolder") private var historyFolder = ""
     @AppStorage("recordingWindow") private var recordingWindow = "Classic"
     @AppStorage("alwaysShowRecordingWindow") private var alwaysShow = false

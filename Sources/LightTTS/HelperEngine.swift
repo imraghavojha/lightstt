@@ -28,8 +28,10 @@ final class HelperEngine: TranscriptionEngine, @unchecked Sendable {
         process.terminationHandler = { _ in if !stopState.wasIntentional() { onCrash() } }
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] != "1" { process.standardError = FileHandle.nullDevice }
+        LaunchTrace.mark("helper-spawn-start")
         try process.run()
+        LaunchTrace.mark("helper-spawned")
     }
     deinit { terminate(); try? FileManager.default.removeItem(at: directory) }
     var isRunning: Bool { process.isRunning }
@@ -46,7 +48,9 @@ final class HelperEngine: TranscriptionEngine, @unchecked Sendable {
     }
     static func load(_ model: Model, language: String = "en", onCrash: @escaping @Sendable () -> Void = {}) async throws -> HelperEngine {
         let helper = try HelperEngine(onCrash: onCrash)
+        LaunchTrace.mark("model-load-start")
         _ = try await helper.request(action: "warm", model: model, language: language)
+        LaunchTrace.mark("model-load-finished")
         return helper
     }
     func transcribe(samples: [Float]) async throws -> String {
@@ -76,7 +80,7 @@ final class HelperEngine: TranscriptionEngine, @unchecked Sendable {
             }
             guard process.isRunning else { throw SpeechError.model("Speech engine exited unexpectedly. Try recording again.") }
             guard ProcessInfo.processInfo.systemUptime < deadline else { throw SpeechError.model("Speech engine \(action) timed out. Try recording again.") }
-            try await Task.sleep(nanoseconds: 20_000_000)
+            try await Task.sleep(nanoseconds: 5_000_000)
         }
     }
 }
