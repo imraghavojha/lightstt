@@ -10,7 +10,6 @@ import LightTTSCore
     private var window: NSWindow?
     private var previousApp: NSRunningApplication?
     private var openingSettings = false
-    private var expanded = false
 
     init(app: AppController) {
         self.app = app
@@ -19,17 +18,14 @@ import LightTTSCore
         status.button?.image = makeStatusImage()
         status.button?.target = self
         status.button?.action = #selector(togglePopover)
+        status.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         popover.behavior = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" ? .applicationDefined : .transient
         popover.animates = false
         popover.delegate = self
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
             popover.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
         }
-        if CommandLine.arguments.contains("--settings-window") { showDetachedSettings() }
-        else if CommandLine.arguments.contains("--settings-popover") {
-            expanded = true; updateContent(attached: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showCompact() }
-        }
+        if CommandLine.arguments.contains("--settings-window") { openSettingsWindow() }
         if ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showCompact() }
         }
@@ -68,43 +64,40 @@ import LightTTSCore
     }
 
     @objc private func togglePopover() {
-        if popover.isShown { popover.performClose(nil) }
-        else { expanded = false; updateContent(attached: true); showCompact() }
+        let event = NSApp.currentEvent
+        if UserDefaults.standard.bool(forKey: "recordOnMenubarClick"), event?.type == .leftMouseUp, event?.modifierFlags.contains(.option) != true {
+            if popover.isShown { popover.performClose(nil) }; app.toggleRecording()
+        } else if popover.isShown { popover.performClose(nil) }
+        else { showCompact() }
     }
     private func showCompact() {
         guard let button = status.button else { return }
-        updateContent(attached: true)
+        updateContent()
         if let appearance = NSApp.appearance { button.appearance = appearance }
         let frontmost = NSWorkspace.shared.frontmostApplication
         previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
-    private func showSettings() {
-        // Re-anchor after changing size: resizing a shown popover can grow it
-        // above the menu bar and leave the settings outside the visible screen.
-        let previous = previousApp
-        openingSettings = true
-        popover.performClose(nil)
-        previousApp = previous
-        expanded = true
-        updateContent(attached: true)
-        if let button = status.button {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        }
-        openingSettings = false
-    }
-    private func showDetachedSettings() {
+    func openSettingsWindow() {
         openingSettings = true
         popover.performClose(nil)
         openingSettings = false
-        if let window { window.makeKeyAndOrderFront(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        if let window { if window.isMiniaturized { window.deminiaturize(nil) }; window.makeKeyAndOrderFront(nil) }
         else {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
             w.standardWindowButton(.zoomButton)?.isHidden = true
-            w.title = "LightTTS"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
+            w.title = "LightTTS"; w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false; w.delegate = self; window = w
-            updateContent(attached: false); w.setFrame(NSRect(x: 0, y: 0, width: 750, height: 508), display: false); w.center(); w.makeKeyAndOrderFront(nil)
+            let host = NSHostingView(rootView: SettingsView(controller: app).ignoresSafeArea())
+            host.sizingOptions = []; w.contentView = host
+            let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+            if let frame = screen?.visibleFrame {
+                let size = NSSize(width: min(750, frame.width), height: min(508, frame.height))
+                w.setFrame(NSRect(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2, width: size.width, height: size.height), display: false)
+            }
+            w.makeKeyAndOrderFront(nil)
             DispatchQueue.main.async {
                 for (button, x) in [(NSWindow.ButtonType.closeButton, 20.0), (.miniaturizeButton, 43.0)] {
                     if let control = w.standardWindowButton(button) {
@@ -114,7 +107,6 @@ import LightTTSCore
                 }
             }
         }
-        NSApp.activate(ignoringOtherApps: true)
     }
     func popoverDidClose(_ notification: Notification) {
         popover.contentViewController = nil
@@ -122,27 +114,15 @@ import LightTTSCore
         guard !openingSettings, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
         previousApp?.activate()
     }
-    private func updateContent(attached: Bool) {
-        if attached && expanded {
-            popover.contentViewController = NSHostingController(rootView: SettingsView(controller: app, detach: { [weak self] in self?.showDetachedSettings() }, attached: true))
-        } else if attached {
-            let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.showSettings() })
-            if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
-                let hosting = NSHostingController(rootView: view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
-                hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
-                popover.contentViewController = hosting
-            } else {
-                popover.contentViewController = NSHostingController(rootView: view)
-            }
+    private func updateContent() {
+        let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.openSettingsWindow() })
+        if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
+            let hosting = NSHostingController(rootView: view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
+            hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
+            popover.contentViewController = hosting
         } else {
-            let host = NSHostingView(rootView: SettingsView(controller: app, detach: { [weak self] in self?.switchPresentation() }, attached: false).ignoresSafeArea())
-            host.sizingOptions = []; window?.contentView = host
+            popover.contentViewController = NSHostingController(rootView: view)
         }
-    }
-    func openSettingsWindow() { showDetachedSettings() }
-    private func switchPresentation() {
-        window?.orderOut(nil); window = nil
-        expanded = true; updateContent(attached: true); showCompact()
     }
     func windowWillClose(_ notification: Notification) { window = nil }
 }
