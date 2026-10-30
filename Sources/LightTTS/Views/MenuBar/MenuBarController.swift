@@ -97,7 +97,10 @@ import LightTTSCore
             updateContent(attached: false); w.setFrame(NSRect(x: 0, y: 0, width: 750, height: 508), display: false); w.center(); w.makeKeyAndOrderFront(nil)
             DispatchQueue.main.async {
                 for (button, x) in [(NSWindow.ButtonType.closeButton, 20.0), (.miniaturizeButton, 43.0)] {
-                    w.standardWindowButton(button)?.setFrameOrigin(NSPoint(x: x, y: 3))
+                    if let control = w.standardWindowButton(button) {
+                        let shift = control.superview?.isFlipped == true ? 5.0 : -5.0
+                        control.setFrameOrigin(NSPoint(x: x, y: 3 + shift))
+                    }
                 }
             }
         }

@@ -6,7 +6,7 @@ import ServiceManagement
 
 private enum SettingsTab: String, CaseIterable {
     case sound = "Sound", models = "Models", library = "Library", configuration = "Configuration"
-    var icon: String { switch self { case .sound: "speaker.wave.2.fill"; case .models: "book.fill"; case .library: "clock.arrow.circlepath"; case .configuration: "gearshape.2" } }
+    var icon: String { switch self { case .sound: "speaker.wave.2.fill"; case .models: "book.fill"; case .library: "clock.arrow.circlepath"; case .configuration: "gearshape" } }
 }
 
 struct SettingsView: View {
@@ -23,7 +23,7 @@ struct SettingsView: View {
                 ForEach(SettingsTab.allCases, id: \.rawValue) { tab in
                     Button { controller.selectSettings(tab.rawValue) } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white).frame(width: 20, height: 20).background(Color(white: 0.32).gradient, in: RoundedRectangle(cornerRadius: 5)).overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.5)).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
+                            Group { if tab == .configuration { ConfigurationGlyph() } else { Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold)) } }.foregroundStyle(.white).frame(width: 20, height: 20).background(Color(white: 0.32).gradient, in: RoundedRectangle(cornerRadius: 5)).overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.5)).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
                             Text(tab.rawValue).font(.system(size: 13, weight: .medium))
                             Spacer()
                         }.padding(.horizontal, 8).frame(height: 35).background(controller.settingsSelection == tab.rawValue ? (dark ? Color.white.opacity(0.16) : Color.white.opacity(0.65)) : .clear, in: RoundedRectangle(cornerRadius: 10))
@@ -37,7 +37,7 @@ struct SettingsView: View {
                 if controller.settingsSelection != "Library" && !(controller.settingsSelection == "Configuration" && controller.showAdvanced) {
                     HStack {
                         Text(controller.settingsSelection).font(.system(size: 13, weight: .bold)); Spacer()
-                        Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(Color.primary.opacity(0.09), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.1))).offset(x: 6).help("Select microphone")
+                        Menu { Button("System Default") { SettingsDefaults.store.set("", forKey: "inputDeviceUID") }; Divider(); ForEach(AVCaptureDevice.devices(for: .audio), id: \.uniqueID) { device in Button(device.localizedName) { SettingsDefaults.store.set(device.uniqueID, forKey: "inputDeviceUID") } } } label: { Image(systemName: "laptopcomputer").font(.system(size: 14)).foregroundStyle(.secondary) }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28, height: 28).background(LinearGradient(colors: dark ? [Color(white: 0.29), Color(white: 0.22)] : [Color(white: 0.99), Color(white: 0.92)], startPoint: .top, endPoint: .bottom), in: Circle()).overlay(Circle().stroke(Color.primary.opacity(0.16), lineWidth: 0.5)).offset(x: 6).help("Select microphone")
                     }.padding(.horizontal, 16).frame(height: 48)
                 }
                 switch controller.settingsSelection {
@@ -48,6 +48,23 @@ struct SettingsView: View {
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color(nsColor: dark ? NSColor(srgbRed: 43/255, green: 48/255, blue: 53/255, alpha: 1) : NSColor(srgbRed: 0.95, green: 0.95, blue: 0.95, alpha: 1)))
         }.frame(width: 750, height: 508).foregroundStyle(dark ? Color(red: 233/255, green: 233/255, blue: 234/255) : Color(white: 0.30)).preferredColorScheme(effectiveTheme == "Dark" ? .dark : effectiveTheme == "Light" ? .light : nil).defaultAppStorage(CommandLine.arguments.contains("--ui-fixture") ? SettingsDefaults.store : .standard)
+    }
+}
+
+private struct ConfigurationGlyph: View {
+    var body: some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            for index in 0..<16 {
+                let angle = Double(index) * .pi / 8
+                var mark = Path()
+                mark.move(to: CGPoint(x: center.x + cos(angle) * 5, y: center.y + sin(angle) * 5))
+                mark.addLine(to: CGPoint(x: center.x + cos(angle) * 7, y: center.y + sin(angle) * 7))
+                context.stroke(mark, with: .color(.white), lineWidth: 0.8)
+            }
+            let ring = CGRect(x: center.x - 4.5, y: center.y - 4.5, width: 9, height: 9)
+            context.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1)
+        }.frame(width: 16, height: 16)
     }
 }
 
