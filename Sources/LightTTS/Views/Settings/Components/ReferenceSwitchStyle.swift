@@ -23,7 +23,7 @@ struct ReferenceSwitchStyle: ToggleStyle {
                 ).offset(x: configuration.isOn ? 7 : -7)
             )
             .frame(width: 34, height: 20).opacity(enabled ? 1 : 0.5)
-        }.buttonStyle(.plain).accessibilityLabel(label).accessibilityValue(
+        }.buttonStyle(.responsive).accessibilityLabel(label).accessibilityValue(
             configuration.isOn ? "On" : "Off")
     }
 }

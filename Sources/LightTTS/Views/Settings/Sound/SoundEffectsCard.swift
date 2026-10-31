@@ -36,7 +36,7 @@ extension SoundPageView {
                             ).shadow(
                                 color: sound == value ? .black.opacity(0.12) : .clear, radius: 1,
                                 y: 0.5)
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.responsive)
                     }
                 }.padding(2).background(
                     Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)
@@ -48,13 +48,13 @@ extension SoundPageView {
                     playSound(start: true)
                 } label: {
                     Image(systemName: "speaker.fill")
-                }.buttonStyle(.plain)
+                }.buttonStyle(.responsive)
                 SoundVolumeSlider(value: $volume, dark: scheme == .dark)
                 Button {
                     playSound(start: false)
                 } label: {
                     Image(systemName: "speaker.wave.2.fill")
-                }.buttonStyle(.plain)
+                }.buttonStyle(.responsive)
             }
         }
     }

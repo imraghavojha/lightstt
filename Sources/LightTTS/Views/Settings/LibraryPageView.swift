@@ -16,7 +16,7 @@ struct LibraryPageView: View {
             VStack(spacing: 0) {
                 header
                 if let warning = controller.historyWarning {
-                    HStack { Image(systemName: "exclamationmark.triangle"); Text(warning); Spacer(); Button { controller.historyWarning = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).help("Dismiss") }
+                    HStack { Image(systemName: "exclamationmark.triangle"); Text(warning); Spacer(); Button { controller.historyWarning = nil } label: { Image(systemName: "xmark") }.buttonStyle(.responsive).help("Dismiss") }
                         .font(.system(size: 11)).padding(10).background(Color.orange.opacity(0.15))
                 }
                 content
@@ -55,10 +55,10 @@ struct LibraryPageView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass")
                     TextField("Search history", text: $controller.historySearch).textFieldStyle(.plain)
-                    Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
+                    Button { controller.historySearch = ""; controller.historySearchVisible = false } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.responsive)
                 }.font(.system(size: 13)).padding(.horizontal, 8).frame(width: 220, height: 28).background(headerChrome, in: Capsule()).overlay(Capsule().stroke(headerEdge, lineWidth: 0.5))
             } else {
-                Button { controller.historySearchVisible = true } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.plain).help("Search recordings")
+                Button { controller.historySearchVisible = true } label: { Image(systemName: "magnifyingglass").frame(width: 28, height: 28).background(headerChrome, in: Circle()).overlay(Circle().stroke(headerEdge, lineWidth: 0.5)).shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.08), radius: 1, y: 1) }.buttonStyle(.responsive).help("Search recordings")
             }
         }.padding(.leading, 16).padding(.trailing, 10).frame(height: 48)
     }
@@ -124,7 +124,7 @@ struct LibraryPageView: View {
                     selected = expanded ? nil : item
                 } label: {
                     Text(item.text).lineLimit(expanded ? nil : 2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain)
+                }.buttonStyle(.responsive)
                 if !expanded && hoveredID == item.id {
                     Menu {
                         Button("Copy") { copy(item) }
@@ -142,7 +142,7 @@ struct LibraryPageView: View {
                     }.padding(2).frame(width: 142, height: 28).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     Spacer()
                     action("doc.on.doc.fill", "Copy") { copy(item) }
-                    Button { controller.processHistoryAgain(item) } label: { if controller.reprocessingHistoryID == item.id { ProgressView().controlSize(.small).frame(width: 24, height: 24) } else { Image(systemName: "gobackward").overlay(Image(systemName: "sparkle").font(.system(size: 6)).offset(y: -1), alignment: .center).frame(width: 24, height: 24) } }.buttonStyle(.plain).disabled(!audioAvailable || controller.reprocessingHistoryID != nil || controller.historyMigration != nil).help(!audioAvailable ? "Recording audio is unavailable" : "Process again")
+                    Button { controller.processHistoryAgain(item) } label: { if controller.reprocessingHistoryID == item.id { ProgressView().controlSize(.small).frame(width: 24, height: 24) } else { Image(systemName: "gobackward").overlay(Image(systemName: "sparkle").font(.system(size: 6)).offset(y: -1), alignment: .center).frame(width: 24, height: 24) } }.buttonStyle(.responsive).disabled(!audioAvailable || controller.reprocessingHistoryID != nil || controller.historyMigration != nil).help(!audioAvailable ? "Recording audio is unavailable" : "Process again")
                     action("info.circle", "Recording information") { state.drawer = true }
                     action("trash", "Delete") { controller.deleteHistory(item.id); selected = nil }
                 }.font(.system(size: 12))
@@ -151,7 +151,7 @@ struct LibraryPageView: View {
                     ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                         Button { controller.toggleHistoryPlayback(item, segment: segment) } label: {
                             HStack { Image(systemName: "play.fill"); Text("Segment \(index + 1)"); Spacer(); Text("\(duration(segment.start)) – \(duration(segment.end))") }.font(.caption)
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.responsive)
                     }
                 }
             }
@@ -163,7 +163,7 @@ struct LibraryPageView: View {
     }
     private func player(_ item: HistoryEntry) -> some View {
         HStack(spacing: 10) {
-            Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.plain).disabled(!audioAvailable)
+            Button { controller.toggleHistoryPlayback(item) } label: { Image(systemName: controller.playingHistoryID == item.id ? "pause.fill" : "play.fill") }.buttonStyle(.responsive).disabled(!audioAvailable)
             GeometryReader { geometry in
                 if let waveform = item.waveform, !waveform.isEmpty {
                     HStack(spacing: 0) {
@@ -182,10 +182,10 @@ struct LibraryPageView: View {
         }.padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
     private func segmentButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).font(.system(size: 11, weight: selected ? .semibold : .regular)).frame(width: title == "Original" ? 60 : 78, height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)).shadow(color: selected ? .black.opacity(0.12) : .clear, radius: 1, y: 1) }.buttonStyle(.plain)
+        Button(action: action) { Text(title).font(.system(size: 11, weight: selected ? .semibold : .regular)).frame(width: title == "Original" ? 60 : 78, height: 24).background(selected ? (scheme == .dark ? Color.white.opacity(0.18) : Color.white) : .clear, in: RoundedRectangle(cornerRadius: 5)).shadow(color: selected ? .black.opacity(0.12) : .clear, radius: 1, y: 1) }.buttonStyle(.responsive)
     }
     private func action(_ icon: String, _ help: String, perform: @escaping () -> Void) -> some View {
-        Button(action: perform) { Image(systemName: icon).frame(width: 24, height: 24) }.buttonStyle(.plain).help(help)
+        Button(action: perform) { Image(systemName: icon).frame(width: 24, height: 24) }.buttonStyle(.responsive).help(help)
     }
     private func metadata(_ item: HistoryEntry) -> some View {
         VStack(spacing: 0) {
@@ -205,7 +205,7 @@ struct LibraryPageView: View {
                 HStack(spacing: 8) {
                     Button("Report issue") { NSWorkspace.shared.open(URL(string: "https://github.com/imraghavojha/lighttts/issues/new")!) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
                     Button("Open file location") { controller.revealHistory(item) }.frame(maxWidth: .infinity, minHeight: 28).background(Color.blue, in: RoundedRectangle(cornerRadius: 7)).foregroundStyle(.white)
-                }.buttonStyle(.plain).font(.system(size: 11))
+                }.buttonStyle(.responsive).font(.system(size: 11))
             }.padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 16)
         }.frame(maxHeight: .infinity).background(drawerBackground).compositingGroup().shadow(color: .black.opacity(0.12), radius: 8, x: -3)
     }

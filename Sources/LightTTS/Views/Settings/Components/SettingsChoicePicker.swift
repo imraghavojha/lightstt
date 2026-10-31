@@ -24,6 +24,8 @@ extension ConfigurationPageView {
                                             ? Color.blue.opacity(0.10) : Color.white))
                                 if value == "None" {
                                     Image(systemName: "eye.slash").foregroundStyle(.secondary)
+                                } else if value == "Island" {
+                                    IslandChoiceArtwork(selected: selection.wrappedValue == value)
                                 } else {
                                     HStack(spacing: 1) {
                                         ForEach(
@@ -47,12 +49,37 @@ extension ConfigurationPageView {
                                     ? Color(red: 0 / 255, green: 145 / 255, blue: 255 / 255)
                                     : .clear, lineWidth: 2
                             ).padding(-3))
-                        Text(value).font(.system(size: 11, weight: .medium)).lineLimit(1).fixedSize(
+                        Text(value == "Island" ? "Dynamic Island" : value).font(
+                            .system(size: 11, weight: .medium)
+                        ).lineLimit(1).fixedSize(
                             horizontal: true, vertical: false
                         ).foregroundStyle(selection.wrappedValue == value ? .primary : .secondary)
                     }
-                }.buttonStyle(.plain)
+                }.buttonStyle(.responsive)
             }
+        }
+    }
+}
+
+/// A small preview of the notch with a wing on each side.
+private struct IslandChoiceArtwork: View {
+    let selected: Bool
+
+    var body: some View {
+        VStack {
+            HStack(spacing: 0) {
+                Circle().fill(Color(red: 1, green: 0.27, blue: 0.23)).frame(width: 4, height: 4)
+                    .frame(width: 16)
+                Color.black.frame(width: 22)
+                HStack(spacing: 1) {
+                    ForEach(Array([3, 5, 7, 5, 3].enumerated()), id: \.offset) { _, height in
+                        Capsule().fill(Color.white).frame(width: 1.5, height: CGFloat(height))
+                    }
+                }.frame(width: 16)
+            }.frame(height: 11).background(
+                UnevenRoundedRectangle(bottomLeadingRadius: 5, bottomTrailingRadius: 5)
+                    .fill(.black))
+            Spacer(minLength: 0)
         }
     }
 }

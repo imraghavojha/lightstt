@@ -55,11 +55,15 @@ struct Shortcut {
         cancelState.setInstalled(true)
         register(toggleShortcut, id: 1)
         if pushAvailable { register(pushShortcut, id: 2) }
-        if AXIsProcessTrusted() {
-            local = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .otherMouseDown, .otherMouseUp]) { [weak self] event in
+        // Ordinary key combinations use Carbon hot keys, which wake LightTTS only when pressed.
+        // The global monitor sees every keystroke in every app, so it is installed only for
+        // modifier-only and mouse-button shortcuts, with just the events they need.
+        let mask = monitoredEvents
+        if AXIsProcessTrusted(), !mask.isEmpty {
+            local = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
                 MainActor.assumeIsolated { self?.handle(event, currentFlags: UInt(CGEventSource.flagsState(.combinedSessionState).rawValue)) }; return event
             }
-            global = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .otherMouseDown, .otherMouseUp]) { [weak self] event in
+            global = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
                 let currentFlags = UInt(CGEventSource.flagsState(.combinedSessionState).rawValue)
                 Task { @MainActor in self?.handle(event, currentFlags: currentFlags) }
             }
@@ -75,6 +79,14 @@ struct Shortcut {
             MainActor.assumeIsolated { self?.resynchronize() }
         }
         return !registrationFailed
+    }
+    var monitoredEvents: NSEvent.EventTypeMask {
+        var mask: NSEvent.EventTypeMask = []
+        if toggleShortcut.modifierOnly || (pushAvailable && pushShortcut.modifierOnly) || cancelShortcut.modifierOnly { mask.insert(.flagsChanged) }
+        // A key pressed while a modifier-only toggle is held marks it as part of a chord.
+        if toggleShortcut.modifierOnly { mask.insert(.keyDown) }
+        if (configuredMouseButton ?? (SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1)) >= 0 { mask.formUnion([.otherMouseDown, .otherMouseUp]) }
+        return mask
     }
     private var pushAvailable: Bool { (configuredShortcuts == nil ? SettingsDefaults.store.bool(forKey: "pushShortcutEnabled") : configuredShortcuts?[2] != nil) && !Shortcut.same(toggleShortcut, pushShortcut) }
     private func register(_ shortcut: Shortcut, id: UInt32) {

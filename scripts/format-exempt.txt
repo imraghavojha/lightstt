@@ -11,9 +11,7 @@ Sources/LightTTS/LightTTSApp.swift
 Sources/LightTTS/MediaPauseSession.swift
 Sources/LightTTS/TextInputPolicy.swift
 Sources/LightTTS/TranscriptClipboard.swift
-Sources/LightTTS/Views/MenuBar/CompactMenuView.swift
 Sources/LightTTS/Views/MenuBar/MenuBarController.swift
-Sources/LightTTS/Views/Popup/RecordingView.swift
 Sources/LightTTS/Views/Settings/LibraryPageView.swift
 Sources/LightTTS/Views/Settings/Models/ModelsPageView.swift
 Sources/LightTTS/Views/Settings/PermissionsCard.swift

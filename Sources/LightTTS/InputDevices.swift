@@ -2,11 +2,32 @@ import AVFoundation
 import AudioToolbox
 import CoreAudio
 
-struct InputDevice: Identifiable {
+struct InputDevice: Identifiable, Equatable {
     let id: String
     let name: String
+    /// Physical and user-facing virtual inputs, without the private aggregate devices
+    /// Core Audio creates for voice processing or default-device routing.
     static var available: [InputDevice] {
-        AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified).devices.map { InputDevice(id: $0.uniqueID, name: $0.localizedName) }
+        var seen = Set<String>()
+        return AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified).devices.compactMap { device in
+            guard !isHiddenSystemDevice(uid: device.uniqueID, name: device.localizedName), seen.insert(device.uniqueID).inserted else { return nil }
+            return InputDevice(id: device.uniqueID, name: device.localizedName)
+        }
+    }
+    static func isHiddenSystemDevice(uid: String, name: String) -> Bool {
+        let prefixes = ["CADefaultDeviceAggregate", "VPAUAggregateAudioDevice", "CAVoiceProcessing"]
+        return prefixes.contains { uid.hasPrefix($0) || name.hasPrefix($0) }
+    }
+    /// The current system default input, used to label the "follow default" choice.
+    static var systemDefault: InputDevice? {
+        guard let device = AVCaptureDevice.default(for: .audio), !isHiddenSystemDevice(uid: device.uniqueID, name: device.localizedName) else { return nil }
+        return InputDevice(id: device.uniqueID, name: device.localizedName)
+    }
+    /// One entry per microphone: the system default appears once, as the "follow default"
+    /// choice (empty ID), followed by every other input.
+    static func choices(available: [InputDevice], systemDefault: InputDevice?) -> [InputDevice] {
+        let followDefault = InputDevice(id: "", name: systemDefault?.name ?? "System Default")
+        return [followDefault] + available.filter { $0.id != systemDefault?.id }
     }
     static func applySelection(to engine: AVAudioEngine, deviceUID: String? = nil) throws {
         guard let uid = deviceUID ?? UserDefaults.standard.string(forKey: "inputDeviceUID"), !uid.isEmpty else { return }

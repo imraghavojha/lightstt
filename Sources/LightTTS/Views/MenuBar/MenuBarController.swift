@@ -10,108 +10,212 @@ enum SettingsWindowSizing {
     }
 }
 
-@MainActor final class MenuBarController: NSObject, NSWindowDelegate, NSPopoverDelegate {
+/// The status item uses a native menu. A menu does not activate LightTTS, so opening it
+/// never raises the Settings window, and the app being dictated into stays frontmost.
+@MainActor final class MenuBarController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private let app: AppController
     private let status: NSStatusItem
-    private let popover = NSPopover()
+    private let menu = NSMenu()
     private var window: NSWindow?
-    private var compactHost: NSHostingController<AnyView>?
     private var settingsHost: NSHostingView<AnyView>?
-    private let compactData = CompactMenuData()
-    private var previousApp: NSRunningApplication?
-    private var lastExternalApp: NSRunningApplication?
-    private var openingSettings = false
+    private var devices: [InputDevice] = []
+    private var systemDefaultDevice: InputDevice?
+    private var observers: [NSObjectProtocol] = []
 
     init(app: AppController) {
         self.app = app
-        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
-        let frontmost = NSWorkspace.shared.frontmostApplication
-        if frontmost?.processIdentifier != ProcessInfo.processInfo.processIdentifier { lastExternalApp = frontmost }
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(frontmostApplicationChanged(_:)), name: NSWorkspace.didActivateApplicationNotification, object: nil)
-        status.button?.image = makeStatusImage()
+        status.button?.image = Self.statusImage
         status.button?.target = self
-        status.button?.action = #selector(togglePopover)
-        status.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        popover.behavior = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" ? .applicationDefined : .transient
-        popover.animates = false
-        popover.delegate = self
+        status.button?.action = #selector(statusClicked)
+        status.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
+        menu.delegate = self
+        menu.autoenablesItems = false
         NotificationCenter.default.addObserver(self, selector: #selector(applicationDidHide), name: NSApplication.didHideNotification, object: NSApp)
         NotificationCenter.default.addObserver(self, selector: #selector(applicationDidUnhide), name: NSApplication.didUnhideNotification, object: NSApp)
-        if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
-            popover.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua)
+        for name in [AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.refreshDevices() }
+            })
         }
+        refreshDevices()
         if CommandLine.arguments.contains("--settings-window") { openSettingsWindow() }
-        if ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_MENU"] == "1" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showCompact() }
-        }
     }
 
-    private func makeStatusImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            let path = NSBezierPath()
-            path.windingRule = .evenOdd
-            // Draw both contours explicitly so the inner corners are rounded too.
-            path.move(to: NSPoint(x: 9, y: 15.75))
-            path.curve(to: NSPoint(x: 7.35, y: 14.55), controlPoint1: NSPoint(x: 8.3, y: 15.75), controlPoint2: NSPoint(x: 7.8, y: 15.35))
-            path.curve(to: NSPoint(x: 1.5, y: 4.75), controlPoint1: NSPoint(x: 5.15, y: 10.9), controlPoint2: NSPoint(x: 1.5, y: 6.2))
-            path.curve(to: NSPoint(x: 2.5, y: 2.25), controlPoint1: NSPoint(x: 1.0, y: 3.1), controlPoint2: NSPoint(x: 1.25, y: 2.25))
-            path.line(to: NSPoint(x: 15.5, y: 2.25))
-            path.curve(to: NSPoint(x: 16.5, y: 4.75), controlPoint1: NSPoint(x: 16.75, y: 2.25), controlPoint2: NSPoint(x: 17.0, y: 3.1))
-            path.curve(to: NSPoint(x: 10.65, y: 14.55), controlPoint1: NSPoint(x: 16.5, y: 6.2), controlPoint2: NSPoint(x: 12.85, y: 10.9))
-            path.curve(to: NSPoint(x: 9, y: 15.75), controlPoint1: NSPoint(x: 10.2, y: 15.35), controlPoint2: NSPoint(x: 9.7, y: 15.75))
-            path.close()
-            path.move(to: NSPoint(x: 9, y: 12.3))
-            path.curve(to: NSPoint(x: 8.4, y: 11.85), controlPoint1: NSPoint(x: 8.75, y: 12.3), controlPoint2: NSPoint(x: 8.55, y: 12.1))
-            path.curve(to: NSPoint(x: 4.7, y: 5.35), controlPoint1: NSPoint(x: 6.6, y: 9.7), controlPoint2: NSPoint(x: 5.05, y: 7.5))
-            path.curve(to: NSPoint(x: 7.5, y: 4.23), controlPoint1: NSPoint(x: 4.4, y: 4.5), controlPoint2: NSPoint(x: 6.2, y: 4.23))
-            path.line(to: NSPoint(x: 10.5, y: 4.23))
-            path.curve(to: NSPoint(x: 13.3, y: 5.35), controlPoint1: NSPoint(x: 12.6, y: 4.23), controlPoint2: NSPoint(x: 13.6, y: 4.5))
-            path.curve(to: NSPoint(x: 9.6, y: 11.85), controlPoint1: NSPoint(x: 12.95, y: 7.5), controlPoint2: NSPoint(x: 11.4, y: 9.7))
-            path.curve(to: NSPoint(x: 9, y: 12.3), controlPoint1: NSPoint(x: 9.45, y: 12.1), controlPoint2: NSPoint(x: 9.25, y: 12.3))
-            path.close()
-            NSColor.black.setFill()
-            path.fill()
-            return true
-        }
+    static var statusImage: NSImage {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        let image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "LightTTS")?.withSymbolConfiguration(configuration) ?? NSImage()
         image.isTemplate = true
-        image.accessibilityDescription = "LightTTS"
         return image
     }
 
-    @objc private func togglePopover() {
+    @objc private func statusClicked() {
         let event = NSApp.currentEvent
-        if UserDefaults.standard.bool(forKey: "recordOnMenubarClick"), event?.type == .leftMouseUp, event?.modifierFlags.contains(.option) != true {
-            if popover.isShown { popover.performClose(nil) }; app.toggleRecording()
-        } else if popover.isShown { popover.performClose(nil) }
-        else { UITrace.begin("popover"); showCompact() }
+        if UserDefaults.standard.bool(forKey: "recordOnMenubarClick"), event?.type == .leftMouseDown, event?.modifierFlags.contains(.option) != true {
+            app.toggleRecording()
+            return
+        }
+        // Attach the menu only for this click so the record-on-click option keeps working.
+        status.menu = menu
+        status.button?.performClick(nil)
+        status.menu = nil
     }
-    private func showCompact() {
-        guard let button = status.button else { return }
-        compactData.load(models: app.models)
-        updateContent()
-        if let appearance = NSApp.appearance { button.appearance = appearance }
-        let frontmost = NSWorkspace.shared.frontmostApplication
-        previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? lastExternalApp : frontmost
-        NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        UITrace.end("popover")
+
+    // MARK: Menu
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        switch app.state {
+        case "recording":
+            menu.addItem(item("Stop Recording", detail: ShortcutButton.displayName(.toggle), action: #selector(toggleRecording)))
+            menu.addItem(item("Cancel Recording", detail: ShortcutButton.displayName(.cancel), action: #selector(cancelRecording)))
+        case "starting":
+            menu.addItem(disabled("Starting…"))
+            menu.addItem(item("Cancel Recording", detail: ShortcutButton.displayName(.cancel), action: #selector(cancelRecording)))
+        case "loading", "processing":
+            menu.addItem(disabled(app.state == "loading" ? "Loading model…" : "Transcribing…"))
+            menu.addItem(item("Cancel", detail: ShortcutButton.displayName(.cancel), action: #selector(cancelRecording)))
+        case "error":
+            menu.addItem(item("Dismiss Error", detail: nil, action: #selector(cancelRecording)))
+            menu.addItem(item("Start Recording", detail: ShortcutButton.displayName(.toggle), action: #selector(toggleRecording)))
+        default:
+            menu.addItem(item("Start Recording", detail: ShortcutButton.displayName(.toggle), action: #selector(toggleRecording)))
+        }
+        menu.addItem(.separator())
+        menu.addItem(modelItem())
+        menu.addItem(microphoneItem())
+        menu.addItem(.separator())
+        let settings = item("Settings…", detail: nil, action: #selector(openSettingsFromMenu))
+        settings.keyEquivalent = ","
+        menu.addItem(settings)
+        menu.addItem(.separator())
+        let quit = item("Quit LightTTS", detail: nil, action: #selector(quitApp))
+        quit.keyEquivalent = "q"
+        menu.addItem(quit)
     }
+
+    func menuDidClose(_ menu: NSMenu) {
+        // Pick up a changed system default input for the next open, off the main thread.
+        refreshDevices()
+    }
+
+    private func modelItem() -> NSMenuItem {
+        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? ModelDefaults.selectedModel
+        let installed = app.models.filter { ModelStore.exists($0) }
+        let current = installed.first { $0.id == selected }
+        let parent = item("Model", detail: current?.name ?? "None", action: nil)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        if installed.isEmpty {
+            submenu.addItem(item("Download a Model…", detail: nil, action: #selector(openModelsSettings)))
+        }
+        for model in installed {
+            let entry = item(model.name, detail: nil, action: #selector(selectModel(_:)))
+            entry.representedObject = model.id
+            entry.state = model.id == selected ? .on : .off
+            submenu.addItem(entry)
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func microphoneItem() -> NSMenuItem {
+        let selected = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
+        let choices = InputDevice.choices(available: devices, systemDefault: systemDefaultDevice)
+        let followsDefault = selected.isEmpty || selected == systemDefaultDevice?.id
+        let current = followsDefault ? choices.first : choices.first { $0.id == selected }
+        let parent = item("Microphone", detail: current?.name ?? "Unavailable", action: nil)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for device in choices {
+            let entry = item(device.name, detail: nil, action: #selector(selectMicrophone(_:)))
+            entry.representedObject = device.id
+            entry.state = (device.id.isEmpty ? followsDefault : device.id == selected) ? .on : .off
+            submenu.addItem(entry)
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func item(_ title: String, detail: String?, action: Selector?) -> NSMenuItem {
+        let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        entry.target = self
+        if let detail, !detail.isEmpty {
+            let font = NSFont.menuFont(ofSize: 0)
+            let style = NSMutableParagraphStyle()
+            style.tabStops = [NSTextTab(textAlignment: .right, location: 236)]
+            let shown = detail.count > 24 ? String(detail.prefix(23)) + "…" : detail
+            let text = NSMutableAttributedString(string: title + "\t", attributes: [.font: font, .paragraphStyle: style])
+            text.append(NSAttributedString(string: shown, attributes: [.font: font, .paragraphStyle: style, .foregroundColor: NSColor.secondaryLabelColor]))
+            entry.attributedTitle = text
+            entry.toolTip = detail.count > 24 ? detail : nil
+        }
+        return entry
+    }
+
+    private func disabled(_ title: String) -> NSMenuItem {
+        let entry = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        entry.isEnabled = false
+        return entry
+    }
+
+    private func refreshDevices() {
+        Task.detached(priority: .utility) {
+            let available = InputDevice.available
+            let systemDefault = InputDevice.systemDefault
+            await MainActor.run { [weak self] in
+                self?.devices = available
+                self?.systemDefaultDevice = systemDefault
+            }
+        }
+    }
+
+    // MARK: Actions
+
+    // The menu never activates LightTTS, so the app being dictated into keeps focus.
+    @objc private func toggleRecording() { app.toggleRecording() }
+    @objc private func cancelRecording() { app.cancel() }
+    @objc private func openSettingsFromMenu() { openSettingsWindow() }
+    // Goes through applicationShouldTerminate, which cancels any session, restores audio,
+    // flushes history and stops the speech engine before exiting.
+    @objc private func quitApp() { NSApp.terminate(nil) }
+    @objc private func openModelsSettings() {
+        app.selectSettings("Models")
+        openSettingsWindow()
+    }
+    @objc private func selectModel(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, UserDefaults.standard.string(forKey: "selectedModel") != id else { return }
+        UserDefaults.standard.set(id, forKey: "selectedModel")
+        app.reloadSelectedModel()
+    }
+    @objc private func selectMicrophone(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        UserDefaults.standard.set(id, forKey: "inputDeviceUID")
+    }
+
+    // MARK: Settings window
+
     func openSettingsWindow() {
         UITrace.begin("settings-window")
-        openingSettings = true
-        popover.performClose(nil)
-        openingSettings = false
         NSApp.activate(ignoringOtherApps: true)
-        if let window { if !window.isVisible || window.isMiniaturized { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }; if window.isMiniaturized { window.deminiaturize(nil) }; window.makeKeyAndOrderFront(nil) }
-        else {
+        if let window {
+            if !window.isVisible || window.isMiniaturized { settingsHost?.rootView = settingsRoot }
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        } else {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             w.minSize = SettingsWindowSizing.minimum
-            w.title = "LightTTS"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
-            w.isReleasedWhenClosed = false; w.delegate = self; window = w
-            let host = NSHostingView(rootView: AnyView(SettingsView(controller: app).ignoresSafeArea()))
+            w.title = "LightTTS"
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.isReleasedWhenClosed = false
+            w.delegate = self
+            window = w
+            let host = NSHostingView(rootView: settingsRoot)
             settingsHost = host
-            host.sizingOptions = []; w.contentView = host
+            host.sizingOptions = []
+            w.contentView = host
             let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
             if let frame = screen?.visibleFrame {
                 let size = NSSize(width: min(750, frame.width), height: min(508, frame.height))
@@ -129,59 +233,14 @@ enum SettingsWindowSizing {
         }
         UITrace.end("settings-window")
     }
-    func popoverDidClose(_ notification: Notification) {
-        compactHost?.rootView = AnyView(EmptyView())
-        defer { previousApp = nil }
-        guard !openingSettings, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
-        previousApp?.activate()
-    }
-    private func performRecordingAction() {
-        let state = app.state
-        let target = previousApp
-        let recordingDate = app.started
-        popover.performClose(nil) // popoverDidClose restores the previously active app
-        if state == "idle" || state == "done" || state == "recording" {
-            Task { @MainActor [weak self] in
-                // Activation is asynchronous. Stop must capture the external field,
-                // just as starting must leave the menu before taking the microphone.
-                if let target, !target.isTerminated {
-                    target.activate()
-                    for _ in 0..<10 {
-                        if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier { break }
-                        try? await Task.sleep(nanoseconds: 50_000_000)
-                    }
-                }
-                guard let self, self.app.state == state || (state == "done" && self.app.state == "idle"), self.app.started == recordingDate else { return }
-                if state == "recording" { self.app.stop() }
-                else { self.app.toggleRecording() }
-            }
-        } else if ["starting", "loading", "processing"].contains(state) {
-            app.cancel()
-        }
-    }
-    private func updateContent() {
-        let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.openSettingsWindow() }, recordingAction: { [weak self] in self?.performRecordingAction() }, cancelRecording: { [weak self] in self?.popover.performClose(nil); self?.app.cancel() }, data: compactData)
-        let root: AnyView
-        if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
-            root = AnyView(view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
-        } else { root = AnyView(view) }
-        if let compactHost { compactHost.rootView = root; popover.contentViewController = compactHost; return }
-        let hosting = NSHostingController(rootView: root)
-        if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] { hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua) }
-        compactHost = hosting; popover.contentViewController = hosting
-    }
-    @objc private func frontmostApplicationChanged(_ notification: Notification) {
-        guard let active = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              active.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
-        lastExternalApp = active
-    }
-    @objc private func applicationDidHide() { compactHost?.rootView = AnyView(EmptyView()); settingsHost?.rootView = AnyView(EmptyView()) }
+    private var settingsRoot: AnyView { AnyView(SettingsView(controller: app).ignoresSafeArea()) }
+
+    @objc private func applicationDidHide() { settingsHost?.rootView = AnyView(EmptyView()) }
     @objc private func applicationDidUnhide() {
-        if popover.isShown { compactData.load(models: app.models); updateContent() }
-        if let window, window.isVisible && !window.isMiniaturized { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }
+        if let window, window.isVisible && !window.isMiniaturized { settingsHost?.rootView = settingsRoot }
     }
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize { SettingsWindowSizing.clamped(frameSize) }
     func windowWillClose(_ notification: Notification) { settingsHost?.rootView = AnyView(EmptyView()) }
     func windowDidMiniaturize(_ notification: Notification) { settingsHost?.rootView = AnyView(EmptyView()) }
-    func windowDidDeminiaturize(_ notification: Notification) { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }
+    func windowDidDeminiaturize(_ notification: Notification) { settingsHost?.rootView = settingsRoot }
 }

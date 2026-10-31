@@ -12,7 +12,7 @@ struct InlineStatus: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.circle")
             Text(message).frame(maxWidth: .infinity, alignment: .leading)
-            Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.plain).help(
+            Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.responsive).help(
                 "Dismiss")
         }.font(.caption).foregroundStyle(.red).padding(12)
             .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))

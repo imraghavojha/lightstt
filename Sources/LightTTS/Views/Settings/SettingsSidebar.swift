@@ -31,51 +31,27 @@ extension SettingsView {
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(SettingsTab.allCases, id: \.rawValue) { tab in
-                Button {
+                SidebarRow(
+                    tab: tab, selected: controller.settingsSelection == tab.rawValue, dark: dark
+                ) {
                     UITrace.begin("page-\(tab.rawValue)")
                     controller.selectSettings(tab.rawValue)
-                } label: {
-                    HStack(spacing: 5) {
-                        Group {
-                            if tab == .configuration {
-                                ConfigurationGlyph()
-                            } else {
-                                Image(systemName: tab.icon).font(
-                                    .system(size: 12, weight: .semibold))
-                            }
-                        }.foregroundStyle(.white).frame(width: 20, height: 20).background(
-                            (tab == .library
-                                ? Color(red: 1, green: 0.42, blue: 0.19) : Color(white: 0.32))
-                                .gradient, in: RoundedRectangle(cornerRadius: 5)
-                        ).overlay(
-                            RoundedRectangle(cornerRadius: 5).stroke(
-                                Color.white.opacity(0.12), lineWidth: 0.5)
-                        ).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
-                        Text(tab.label).font(.system(size: 13, weight: .medium))
-                        Spacer()
-                    }.padding(.horizontal, 8).frame(height: 35).background(
-                        controller.settingsSelection == tab.rawValue
-                            ? (dark ? Color.white.opacity(0.16) : Color.white.opacity(0.65))
-                            : .clear, in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain)
+                }
                 if tab == .library { Color.clear.frame(height: 12) }
             }
             Spacer()
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "waveform").font(.system(size: 12, weight: .semibold))
-                    Text("LightTTS").font(.system(size: 11, weight: .semibold))
-                    Spacer()
-                }
-                Text("Your voice, in text.").font(.system(size: 11, weight: .medium))
-                Text("Record and transcribe from your menu bar.").font(.system(size: 10))
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }.padding(9).frame(maxWidth: .infinity, alignment: .leading).background(
-                dark ? Color.white.opacity(0.07) : Color.white.opacity(0.55),
-                in: RoundedRectangle(cornerRadius: 9)
-            ).overlay(
-                RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
-            )
+            HStack(spacing: 7) {
+                Image(systemName: "waveform").font(.system(size: 13, weight: .semibold))
+                Text("LightTTS").font(.system(size: 12, weight: .semibold))
+                Spacer()
+            }.padding(.horizontal, 10).padding(.vertical, 9).frame(maxWidth: .infinity)
+                .background(
+                    dark ? Color.white.opacity(0.07) : Color.white.opacity(0.55),
+                    in: RoundedRectangle(cornerRadius: 9)
+                ).overlay(
+                    RoundedRectangle(cornerRadius: 9).stroke(
+                        Color.primary.opacity(0.1), lineWidth: 0.5)
+                )
         }.padding(.horizontal, 12).padding(.top, 58).padding(.bottom, 12).frame(width: 184).frame(
             maxHeight: .infinity
         ).background(
@@ -83,6 +59,58 @@ extension SettingsView {
                 nsColor: dark
                     ? NSColor(srgbRed: 58 / 255, green: 62 / 255, blue: 69 / 255, alpha: 1)
                     : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.91, alpha: 1)))
+    }
+}
+
+private struct SidebarRow: View {
+    let tab: SettingsTab
+    let selected: Bool
+    let dark: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @State private var pressed = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Group {
+                if tab == .configuration {
+                    ConfigurationGlyph()
+                } else {
+                    Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold))
+                }
+            }.foregroundStyle(.white).frame(width: 20, height: 20).background(
+                (tab == .library
+                    ? Color(red: 1, green: 0.42, blue: 0.19) : Color(white: 0.32))
+                    .gradient, in: RoundedRectangle(cornerRadius: 5)
+            ).overlay(
+                RoundedRectangle(cornerRadius: 5).stroke(
+                    Color.white.opacity(0.12), lineWidth: 0.5)
+            ).shadow(color: .black.opacity(0.25), radius: 1, y: 1)
+            Text(tab.label).font(.system(size: 13, weight: .medium))
+            Spacer(minLength: 0)
+        }.padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 35).background(
+            background, in: RoundedRectangle(cornerRadius: 10)
+        )
+        .contentShape(Rectangle())
+        // Select on mouse-down, like a native sidebar, instead of waiting for release.
+        .gesture(
+            DragGesture(minimumDistance: 0).onChanged { _ in
+                if !pressed {
+                    pressed = true
+                    if !selected { action() }
+                }
+            }.onEnded { _ in pressed = false }
+        )
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { action() }
+    }
+
+    private var background: Color {
+        if selected { return dark ? Color.white.opacity(0.16) : Color.white.opacity(0.65) }
+        if hovering { return dark ? Color.white.opacity(0.07) : Color.white.opacity(0.35) }
+        return .clear
     }
 }
 

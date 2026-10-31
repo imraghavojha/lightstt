@@ -7,6 +7,10 @@ import LightTTSCore
 
 @MainActor final class SettingsDevices: ObservableObject {
     @Published var devices: [InputDevice] = []
+    @Published var systemDefault: InputDevice?
+    var choices: [InputDevice] {
+        InputDevice.choices(available: devices, systemDefault: systemDefault)
+    }
     private var observers: [NSObjectProtocol] = []
     init() {
         refresh()
@@ -23,7 +27,11 @@ import LightTTSCore
     private func refresh() {
         DispatchQueue.global(qos: .userInitiated).async {
             let devices = InputDevice.available
-            DispatchQueue.main.async { self.devices = devices }
+            let systemDefault = InputDevice.systemDefault
+            DispatchQueue.main.async {
+                self.devices = devices
+                self.systemDefault = systemDefault
+            }
         }
     }
 }
@@ -34,13 +42,17 @@ extension SettingsView {
             Text(controller.settingsSelection).font(.system(size: 13, weight: .bold))
             Spacer()
             Menu {
-                Button("System Default") {
-                    SettingsDefaults.store.set("", forKey: "inputDeviceUID")
-                }
-                Divider()
-                ForEach(devices.devices, id: \.id) { device in
-                    Button(device.name) {
-                        SettingsDefaults.store.set(device.id, forKey: "inputDeviceUID")
+                let selected = selectedInput
+                let followsDefault = selected.isEmpty || selected == devices.systemDefault?.id
+                ForEach(devices.choices, id: \.id) { device in
+                    Button {
+                        selectedInput = device.id
+                    } label: {
+                        if device.id.isEmpty ? followsDefault : device.id == selected {
+                            Label(device.name, systemImage: "checkmark")
+                        } else {
+                            Text(device.name)
+                        }
                     }
                 }
             } label: {

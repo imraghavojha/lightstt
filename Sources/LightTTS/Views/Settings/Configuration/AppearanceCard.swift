@@ -17,11 +17,21 @@ extension ConfigurationPageView {
             }.padding(.top, 12).padding(.bottom, 4)
             PageRule()
             HStack(alignment: .top) {
-                Text("Recording window").padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recording window").padding(.top, 1)
+                    if recordingWindow == "Mini" {
+                        Text("Drag the window to move it.").font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        if !recordingPanelPosition.isEmpty {
+                            Button("Reset position") { controller.resetRecordingWindowPosition() }
+                                .buttonStyle(.link).font(.system(size: 11))
+                        }
+                    }
+                }
                 Spacer()
                 choices(
-                    ["Mini", "None"], selection: $recordingWindow,
-                    icons: ["waveform", "eye.slash"]
+                    ["Mini", "Island", "None"], selection: $recordingWindow,
+                    icons: ["waveform", "capsule.tophalf.filled", "eye.slash"]
                 ).padding(.trailing, 4)
             }.padding(.top, 12).padding(.bottom, 10)
         }.onChange(of: recordingWindow) { _ in controller.refreshRecordingWindow() }
