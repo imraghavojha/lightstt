@@ -3,6 +3,13 @@ import SwiftUI
 import AVFoundation
 import LightTTSCore
 
+enum SettingsWindowSizing {
+    static let minimum = NSSize(width: 750, height: 508)
+    static func clamped(_ size: NSSize) -> NSSize {
+        NSSize(width: max(minimum.width, size.width), height: max(minimum.height, size.height))
+    }
+}
+
 @MainActor final class MenuBarController: NSObject, NSWindowDelegate, NSPopoverDelegate {
     private let app: AppController
     private let status: NSStatusItem
@@ -99,7 +106,7 @@ import LightTTSCore
         if let window { if !window.isVisible || window.isMiniaturized { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }; if window.isMiniaturized { window.deminiaturize(nil) }; window.makeKeyAndOrderFront(nil) }
         else {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-            w.minSize = NSSize(width: 750, height: 508)
+            w.minSize = SettingsWindowSizing.minimum
             w.title = "LightTTS"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false; w.delegate = self; window = w
             let host = NSHostingView(rootView: AnyView(SettingsView(controller: app).ignoresSafeArea()))
@@ -173,6 +180,7 @@ import LightTTSCore
         if popover.isShown { compactData.load(models: app.models); updateContent() }
         if let window, window.isVisible && !window.isMiniaturized { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }
     }
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize { SettingsWindowSizing.clamped(frameSize) }
     func windowWillClose(_ notification: Notification) { settingsHost?.rootView = AnyView(EmptyView()) }
     func windowDidMiniaturize(_ notification: Notification) { settingsHost?.rootView = AnyView(EmptyView()) }
     func windowDidDeminiaturize(_ notification: Notification) { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }
