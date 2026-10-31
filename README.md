@@ -4,6 +4,6 @@
 
 <h1 align="center">LightSTT</h1>
 
-<p align="center">Faster and more lightweight than Superwhisper.<br>Made for personal use.</p>
+<p align="center">Superfast and lightweight Speech to Text.<br>Made for personal use.</p>
 
 ![Press Option-Space, speak, and paste.](assets/demo.gif)
