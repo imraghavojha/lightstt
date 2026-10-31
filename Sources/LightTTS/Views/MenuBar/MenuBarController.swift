@@ -133,7 +133,7 @@ import LightTTSCore
         let target = previousApp
         let recordingDate = app.started
         popover.performClose(nil) // popoverDidClose restores the previously active app
-        if state == "idle" || state == "recording" {
+        if state == "idle" || state == "done" || state == "recording" {
             Task { @MainActor [weak self] in
                 // Activation is asynchronous. Stop must capture the external field,
                 // just as starting must leave the menu before taking the microphone.
@@ -144,9 +144,9 @@ import LightTTSCore
                         try? await Task.sleep(nanoseconds: 50_000_000)
                     }
                 }
-                guard let self, self.app.state == state, self.app.started == recordingDate else { return }
-                if state == "idle" { self.app.toggleRecording() }
-                else { self.app.stop() }
+                guard let self, self.app.state == state || (state == "done" && self.app.state == "idle"), self.app.started == recordingDate else { return }
+                if state == "recording" { self.app.stop() }
+                else { self.app.toggleRecording() }
             }
         } else if ["starting", "loading", "processing"].contains(state) {
             app.cancel()

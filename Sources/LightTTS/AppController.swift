@@ -279,17 +279,17 @@ import IOKit.ps
         if state == "error" { cancel() }
         if ["starting", "processing", "loading"].contains(state) { cancel() }
         else if state == "recording" { stop() }
-        else if state == "idle" { start() }
+        else if state == "idle" || state == "done" { start() }
     }
     private func handlePush(_ down: Bool) {
         pushHeld = down
-        if down { if state == "error" { cancel() }; if state == "idle" { pushOwnsRecording = true; start(pushToTalk: true) } }
+        if down { if state == "error" { cancel() }; if state == "idle" || state == "done" { pushOwnsRecording = true; start(pushToTalk: true) } }
         else if pushOwnsRecording { if state == "recording" { LaunchTrace.mark("hotkey-stop") }; pushOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
     }
     private func handleMouse(_ down: Bool) {
         if down {
             mouseStart = Date()
-            if state == "idle" { mouseOwnsRecording = true; start() }
+            if state == "idle" || state == "done" { mouseOwnsRecording = true; start() }
             else if state == "recording" { mouseOwnsRecording = false; stop() }
         } else if let startTime = mouseStart {
             mouseStart = nil
@@ -297,7 +297,7 @@ import IOKit.ps
         }
     }
     func start(pushToTalk: Bool = false) {
-        guard state == "idle", historyMigration == nil, reprocessingHistoryID == nil else { return }
+        guard state == "idle" || state == "done", historyMigration == nil, reprocessingHistoryID == nil else { return }
         guard pendingHistoryPreparation < maximumPendingHistoryPreparation else {
             fail("History is still saving. Try recording again in a moment."); return
         }
@@ -504,7 +504,17 @@ import IOKit.ps
         } else { saveHistory() }
         copiedToClipboard = copied
         if let warning { fail(warning) }
-        else { state = "idle"; scheduleEngineUnload() }
+        else if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { hide() }
+        else {
+            state = "done"
+            showPanel()
+            let current = generation
+            panelDeadline = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: copied ? 1_000_000_000 : 150_000_000)
+                guard !Task.isCancelled, let self, self.generation == current, self.state == "done" else { return }
+                self.hide()
+            }
+        }
         if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
     }
 

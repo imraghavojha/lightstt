@@ -1,4 +1,5 @@
 import LightTTSRuntime
+import AppKit
 import Foundation
 import AVFoundation
 
@@ -110,6 +111,12 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         UserDefaults.standard.set("Classic", forKey: "recordingWindow")
         let controller = AppController()
         precondition(UserDefaults.standard.string(forKey: "recordingWindow") == "Mini", "Classic must migrate to Mini")
+        let savedCloseAfter = UserDefaults.standard.object(forKey: "closeAfterTranscription")
+        defer {
+            if let savedCloseAfter { UserDefaults.standard.set(savedCloseAfter, forKey: "closeAfterTranscription") }
+            else { UserDefaults.standard.removeObject(forKey: "closeAfterTranscription") }
+        }
+        UserDefaults.standard.set(true, forKey: "closeAfterTranscription")
         // Freeze the serial preparation after delivery, then exercise a new session,
         // deletion, migration, and quit while the old recording is still pending.
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
@@ -125,15 +132,28 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         controller.cancel()
         precondition(controller.history.contains(where: { $0.id == first.id }), "new session cancellation must not discard delivered history")
         let second = HistoryEntry(text: "later", date: first.date.addingTimeInterval(1))
+        UserDefaults.standard.set(false, forKey: "closeAfterTranscription")
         controller.commitDelivered(second, samples: nil, warning: nil, copied: true)
         precondition(controller.history.first?.id == second.id)
+        precondition(controller.state == "done" && controller.copiedToClipboard && controller.recordingPanelVisible, "copy-only completion must show feedback when close-after is disabled")
+        controller.toggleRecording()
+        precondition(controller.state == "recording", "completion feedback must not delay the next shortcut")
+        controller.cancel()
         controller.deleteHistory(first.id)
         controller.historyPreparationHook = nil
         let third = HistoryEntry(text: "kept", date: first.date.addingTimeInterval(2))
+        UserDefaults.standard.set(true, forKey: "closeAfterTranscription")
         controller.commitDelivered(third, samples: [Float](repeating: 0.3, count: 32000), warning: nil, copied: false)
-        controller.beginQuit()
+        precondition(controller.state == "idle" && !controller.recordingPanelVisible, "close-after must dismiss completion")
+        var terminationReplies: [Bool] = []
+        let delegate = AppDelegate(controller: controller, terminationReply: { terminationReplies.append($0) })
+        precondition(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+        try await Task.sleep(nanoseconds: 2_100_000_000)
+        precondition(terminationReplies.isEmpty, "application termination must not outrun pending history after two seconds")
         release.signal()
         await controller.finishQuit()
+        for _ in 0..<100 where terminationReplies.isEmpty { try await Task.sleep(nanoseconds: 1_000_000) }
+        precondition(terminationReplies == [true], "termination must reply once after history flush")
         let disk = try JSONDecoder().decode([HistoryEntry].self, from: Data(contentsOf: controller.historyURL))
         precondition(disk.contains(where: { $0.id == second.id }) && !disk.contains(where: { $0.id == first.id }), "quit must flush deletion without resurrecting old history")
         let savedThird = disk.first { $0.id == third.id }!

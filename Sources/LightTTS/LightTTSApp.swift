@@ -7,6 +7,8 @@ import Foundation
     let controller: AppController
     private var hotkeyReady = false
     private var catalogReady = false
+    private var terminating = false
+    private let terminationReply: ((Bool) -> Void)?
     private var isUITest: Bool {
         let env = ProcessInfo.processInfo.environment
         return CommandLine.arguments.contains("--ui-fixture") || env["LIGHTTTS_UI_SHOT_STATE"] != nil || env["LIGHTTTS_UI_SHOT_MENU"] == "1" || env["LIGHTTTS_TEST_AUDIO"] != nil
@@ -15,7 +17,7 @@ import Foundation
         guard hotkeyReady && catalogReady, let marker = ProcessInfo.processInfo.environment["LIGHTTTS_LAUNCH_MARKER"] else { return }
         try? Data("ready".utf8).write(to: URL(fileURLWithPath: marker), options: .atomic)
     }
-    init(controller: AppController) { self.controller = controller }
+    init(controller: AppController, terminationReply: ((Bool) -> Void)? = nil) { self.controller = controller; self.terminationReply = terminationReply }
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(openURL(_:withReplyEvent:)), forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
@@ -26,11 +28,15 @@ import Foundation
     func applicationDidBecomeActive(_ notification: Notification) { if !isUITest && !CommandLine.arguments.contains("--models-window") && AXIsProcessTrusted() { hotkeyReady = controller.installHotkey(); writeReadyMarker() } }
     func catalogDidLoad() { catalogReady = true; writeReadyMarker() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        var replied = false
-        let reply = { if !replied { replied = true; sender.reply(toApplicationShouldTerminate: true) } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reply)
+        guard !terminating else { return .terminateLater }
+        terminating = true
         controller.beginQuit()
-        Task { await controller.finishQuit(); reply() }
+        Task {
+            await controller.finishQuit()
+            terminating = false
+            if let terminationReply { terminationReply(true) }
+            else { sender.reply(toApplicationShouldTerminate: true) }
+        }
         return .terminateLater
     }
     #if DEBUG
