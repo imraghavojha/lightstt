@@ -40,10 +40,10 @@ struct CompactMenuView: View {
     var body: some View {
         VStack(spacing: 0) {
             switch controller.state {
-            case "idle", "recording":
+            case "idle", "done", "recording":
                 Button(action: recordingAction) {
                     HStack {
-                        Text(controller.state == "idle" ? "Start Recording" : "Stop Recording")
+                        Text(controller.state == "recording" ? "Stop Recording" : "Start Recording")
                         Spacer()
                         Text(ShortcutButton.displayName(.toggle)).foregroundStyle(.secondary)
                     }.contentShape(Rectangle()).padding(.horizontal, 14).frame(height: 32)

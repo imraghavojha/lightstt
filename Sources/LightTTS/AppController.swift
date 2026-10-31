@@ -76,7 +76,12 @@ import IOKit.ps
     @Published var historyMigration: Progress?
     private let historyQueue = DispatchQueue(label: "com.lighttts.history", qos: .utility)
     private let historyPersistence = HistoryPersistence()
-    private var pendingHistoryAudio: [String: Data] = [:]
+    // Accessed only on historyQueue. Snapshots queued before preparation completes
+    // are augmented there, so they cannot overwrite prepared metadata.
+    nonisolated(unsafe) private var preparedHistory: [UUID: (segments: [RecordingSegment], waveform: [Float])] = [:]
+    private var pendingHistoryPreparation = 0
+    var historyPreparationHook: (() -> Void)? // deterministic test seam
+    private let maximumPendingHistoryPreparation = 8
     var historyURL: URL {
         let fixture = CommandLine.arguments.contains("--ui-fixture") || !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
         let configured = UserDefaults.standard.string(forKey: "historyFolder")
@@ -87,7 +92,7 @@ import IOKit.ps
         let source = historyURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
         let destination = destination.standardizedFileURL.resolvingSymlinksInPath()
         guard source != destination else { return }
-        guard historyMigration == nil, state == "idle" || state == "error" else { throw NSError(domain: "LightTTS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Wait for the current recording or folder change to finish."]) }
+        guard historyMigration == nil, pendingHistoryPreparation == 0, reprocessingHistoryID == nil, state == "idle" || state == "error" else { throw NSError(domain: "LightTTS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Wait for the current recording or folder change to finish."]) }
         guard !destination.path.hasPrefix(source.appendingPathComponent("Recordings", isDirectory: true).path + "/") else { throw NSError(domain: "LightTTS", code: 3, userInfo: [NSLocalizedDescriptionKey: "Choose a folder outside the current Recordings folder."]) }
         stopHistoryPlayback()
         let progress = Progress(totalUnitCount: 0)
@@ -274,17 +279,17 @@ import IOKit.ps
         if state == "error" { cancel() }
         if ["starting", "processing", "loading"].contains(state) { cancel() }
         else if state == "recording" { stop() }
-        else if state == "idle" { start() }
+        else if state == "idle" || state == "done" { start() }
     }
     private func handlePush(_ down: Bool) {
         pushHeld = down
-        if down { if state == "error" { cancel() }; if state == "idle" { pushOwnsRecording = true; start(pushToTalk: true) } }
+        if down { if state == "error" { cancel() }; if state == "idle" || state == "done" { pushOwnsRecording = true; start(pushToTalk: true) } }
         else if pushOwnsRecording { if state == "recording" { LaunchTrace.mark("hotkey-stop") }; pushOwnsRecording = false; if state == "starting" { cancel() } else if state == "recording" { stop() } }
     }
     private func handleMouse(_ down: Bool) {
         if down {
             mouseStart = Date()
-            if state == "idle" { mouseOwnsRecording = true; start() }
+            if state == "idle" || state == "done" { mouseOwnsRecording = true; start() }
             else if state == "recording" { mouseOwnsRecording = false; stop() }
         } else if let startTime = mouseStart {
             mouseStart = nil
@@ -292,7 +297,10 @@ import IOKit.ps
         }
     }
     func start(pushToTalk: Bool = false) {
-        guard state == "idle", historyMigration == nil, reprocessingHistoryID == nil else { return }
+        guard state == "idle" || state == "done", historyMigration == nil, reprocessingHistoryID == nil else { return }
+        guard pendingHistoryPreparation < maximumPendingHistoryPreparation else {
+            fail("History is still saving. Try recording again in a moment."); return
+        }
         copiedToClipboard = false
         recordingUsesPushToTalk = pushToTalk
         generation += 1; let current = generation
@@ -453,24 +461,61 @@ import IOKit.ps
                 let pasteWarning = outcome.warning
                 let copied = outcome.delivery == .copied
 
-                hideImmediately()
                 LaunchTrace.mark("text-inserted")
                 var item = HistoryEntry(text: text, date: recordingDate)
                 item.inputName = inputName; item.recordingDuration = recordDuration; item.modelName = model.name; item.processingDuration = Date().timeIntervalSince(processingStart); item.mode = "Voice to text"
-                if !isTestAudio {
-                    let analysis = await Task.detached(priority: .utility) { (AudioProcessing.speechSegments(rawSamples), AudioProcessing.waveform(rawSamples)) }.value
-                    item.segments = analysis.0; item.waveform = analysis.1
-                    let filename = item.id.uuidString + ".wav"
-                    let recording = await Task.detached(priority: .utility) { RecordingWAV.encode(rawSamples) }.value
-                    guard !Task.isCancelled, current == generation else { return }
-                    item.audioFile = filename; pendingHistoryAudio[filename] = recording
-                }
-                panelDeadline?.cancel()
-                history.insert(item, at: 0); if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }; pruneHistory(); saveHistory(); if let pasteWarning { fail(pasteWarning); return }; copiedToClipboard = copied; if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { state = "idle"; scheduleEngineUnload() } else { state = "done" }; if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
+                commitDelivered(item, samples: isTestAudio ? nil : rawSamples, warning: pasteWarning, copied: copied)
 
-                if state == "done" { try? await Task.sleep(nanoseconds: 150_000_000); if current == generation { hide() } }
             } catch { if current == generation { fail(error.localizedDescription) } }
         }
+    }
+
+    // Delivery is the ownership boundary: cancellation after this point cannot
+    // discard the transcript or its recording, even if another session starts.
+    func commitDelivered(_ entry: HistoryEntry, samples: [Float]?, warning: String?, copied: Bool) {
+        panelDeadline?.cancel()
+        hideImmediately()
+        var item = entry
+        if samples != nil { item.audioFile = item.id.uuidString + ".wav" }
+        history.insert(item, at: history.firstIndex(where: { $0.date <= item.date }) ?? history.endIndex)
+        if history.count > 500 { deleteRecordings(Array(history.dropFirst(500))); history.removeLast(history.count - 500) }
+        pruneHistory()
+        if let samples, history.contains(where: { $0.id == item.id }) {
+            pendingHistoryPreparation += 1
+            let snapshot = history, hook = historyPreparationHook
+            let url = historyURL, fallback = ModelStore.directory.deletingLastPathComponent()
+            let configured = UserDefaults.standard.string(forKey: "historyFolder") != nil && !CommandLine.arguments.contains("--ui-fixture") && !isTestAudio
+            historyQueue.async { [self] in
+                hook?()
+                let segments = AudioProcessing.speechSegments(samples), waveform = AudioProcessing.waveform(samples)
+                let recording = RecordingWAV.encode(samples)
+                preparedHistory[item.id] = (segments, waveform)
+                historyPersistence.enqueueRecording(recording, named: item.audioFile!)
+                persistHistory(snapshot, url: url, fallback: configured ? fallback : nil)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.pendingHistoryPreparation -= 1
+                    if let index = self.history.firstIndex(where: { $0.id == item.id }) {
+                        self.history[index].segments = segments; self.history[index].waveform = waveform
+                        if self.selectedHistory?.id == item.id { self.selectedHistory = self.history[index] }
+                    }
+                }
+            }
+        } else { saveHistory() }
+        copiedToClipboard = copied
+        if let warning { fail(warning) }
+        else if UserDefaults.standard.bool(forKey: "closeAfterTranscription") { hide() }
+        else {
+            state = "done"
+            showPanel()
+            let current = generation
+            panelDeadline = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: copied ? 1_000_000_000 : 150_000_000)
+                guard !Task.isCancelled, let self, self.generation == current, self.state == "done" else { return }
+                self.hide()
+            }
+        }
+        if isTestAudio { UserDefaults.standard.set("done", forKey: "testRecordingState") }
     }
 
     func cancel() {
@@ -570,7 +615,7 @@ import IOKit.ps
         pendingHistoryReprocess = nil; reprocessingHistoryID = nil; processHistoryAgain(item)
     }
     func processHistoryAgain(_ item: HistoryEntry) {
-        guard reprocessingHistoryID == nil, historyMigration == nil, let url = historyAudioURL(item) else { return }
+        guard reprocessingHistoryID == nil, historyMigration == nil, pendingHistoryPreparation == 0, let url = historyAudioURL(item) else { return }
         reprocessingHistoryID = item.id; historyProcessingError = nil
         if state == "starting" || state == "recording" { pendingHistoryReprocess = item; return }
         let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? ModelDefaults.selectedModel
@@ -611,28 +656,40 @@ import IOKit.ps
             guard let name = item.audioFile, name == item.id.uuidString + ".wav" else { return nil }
             return name
         }
-        historyQueue.async { for name in names { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) } }
+        historyQueue.async { [self] in
+            for name in names {
+                historyPersistence.discardRecording(named: name)
+                if let id = UUID(uuidString: String(name.dropLast(4))) { preparedHistory.removeValue(forKey: id) }
+                try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+            }
+        }
     }
     private func saveHistory() {
-        let snapshot = history, url = historyURL, recordings = pendingHistoryAudio
-        pendingHistoryAudio.removeAll()
+        let snapshot = history, url = historyURL
         let fallback = ModelStore.directory.deletingLastPathComponent()
         let configured = UserDefaults.standard.string(forKey: "historyFolder") != nil && !CommandLine.arguments.contains("--ui-fixture") && !isTestAudio
-        historyQueue.async { [weak self, historyPersistence] in
-            for (name, data) in recordings { historyPersistence.enqueueRecording(data, named: name) }
-            let result: (folder: URL, fellBack: Bool, error: Error?)
-            do { result = historyPersistence.save(try JSONEncoder().encode(snapshot), in: url.deletingLastPathComponent(), fallback: configured ? fallback : nil) }
-            catch { result = (url.deletingLastPathComponent(), false, error) }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let changedFolder = result.fellBack && UserDefaults.standard.string(forKey: "historyFolder") == url.deletingLastPathComponent().path
-                if changedFolder { UserDefaults.standard.removeObject(forKey: "historyFolder") }
-                if let error = result.error {
-                    let prefix = changedFolder ? "History folder unavailable; using Application Support. " : ""
-                    self.historyWarning = prefix + "History could not be saved: \(error.localizedDescription). It will be retried on the next save."
-                } else if changedFolder { self.historyWarning = "History folder unavailable. Using Application Support instead." }
-                else if !result.fellBack && self.historyWarning?.contains("History could not be saved:") == true { self.historyWarning = nil }
+        historyQueue.async { [self] in persistHistory(snapshot, url: url, fallback: configured ? fallback : nil) }
+    }
+    // Runs on historyQueue, including serialization and retryable recording writes.
+    nonisolated private func persistHistory(_ snapshot: [HistoryEntry], url: URL, fallback: URL?) {
+        var entries = snapshot
+        for index in entries.indices {
+            if let prepared = preparedHistory[entries[index].id] {
+                entries[index].segments = prepared.segments; entries[index].waveform = prepared.waveform
             }
+        }
+        let result: (folder: URL, fellBack: Bool, error: Error?)
+        do { result = historyPersistence.save(try JSONEncoder().encode(entries), in: url.deletingLastPathComponent(), fallback: fallback) }
+        catch { result = (url.deletingLastPathComponent(), false, error) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let changedFolder = result.fellBack && UserDefaults.standard.string(forKey: "historyFolder") == url.deletingLastPathComponent().path
+            if changedFolder { UserDefaults.standard.removeObject(forKey: "historyFolder") }
+            if let error = result.error {
+                let prefix = changedFolder ? "History folder unavailable; using Application Support. " : ""
+                self.historyWarning = prefix + "History could not be saved: \(error.localizedDescription). It will be retried on the next save."
+            } else if changedFolder { self.historyWarning = "History folder unavailable. Using Application Support instead." }
+            else if !result.fellBack && self.historyWarning?.contains("History could not be saved:") == true { self.historyWarning = nil }
         }
     }
     func importLocalModel(engine: String = "whisper", version: String = "") {
