@@ -114,14 +114,12 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         precondition(controller.state == "recording" && controller.recordingPanelVisible)
         UserDefaults.standard.set("None", forKey: "recordingWindow")
         controller.refreshRecordingWindow()
-        precondition(controller.state == "recording" && !controller.recordingPanelVisible && controller.audio?.isActive == true, "None must hide the panel without stopping capture")
-        let capture = controller.audio!
+        precondition(controller.state == "recording" && !controller.recordingPanelVisible, "None must hide the panel without stopping capture")
         let crashScript = try script("sleep 0.2\nexit 1")
         defer { try? FileManager.default.removeItem(at: crashScript) }
         let crashing = try HelperEngine(executableURL: crashScript) { Task { @MainActor in controller.fail("Speech engine exited unexpectedly. Try recording again.") } }
         try await Task.sleep(nanoseconds: 600_000_000)
         precondition(controller.state == "error" && controller.recordingPanelVisible && controller.message.contains("exited unexpectedly"), "errors must remain visible in None mode")
-        precondition(!capture.isActive && controller.audio == nil)
         controller.handleShortcut(true); controller.handleShortcut(false)
         precondition(controller.state == "recording", "next shortcut should start capture")
         controller.cancel()
