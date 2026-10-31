@@ -4,7 +4,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LOCK=/tmp/lighttts-screen.lock
-TMP=""; locked=0; clipboard=0; say_pid=""; superwhisper=""; targets=""
+TMP=""; locked=0; clipboard=0; say_pid=""; chrome_pid=""; superwhisper=""; targets=""
 cleanup() {
   local status=$? bundle identity file
   trap - EXIT INT TERM
@@ -15,8 +15,9 @@ cleanup() {
       "$D" close "$bundle" "$identity" || { echo "FAIL: cleanup $identity" >&2; status=1; }
     done < "$targets"
   fi
+  if [ -n "$chrome_pid" ]; then kill "$chrome_pid" 2>/dev/null || true; wait "$chrome_pid" 2>/dev/null || true; fi
   if [ "$clipboard" = 1 ]; then "$D" restore "$TMP/clipboard" || { echo 'FAIL: clipboard restore' >&2; status=1; }; fi
-  if [ -n "$superwhisper" ]; then open "$superwhisper"; else open -a superwhisper; fi || { echo 'FAIL: SuperWhisper relaunch' >&2; status=1; }
+  if [ -n "$superwhisper" ]; then open "$superwhisper" || { echo 'FAIL: SuperWhisper relaunch' >&2; status=1; }; fi
   [ -z "$TMP" ] || rm -rf "$TMP"
   [ "$locked" = 0 ] || rmdir "$LOCK" 2>/dev/null || { echo 'FAIL: could not release screen lock' >&2; status=1; }
   exit "$status"
@@ -50,23 +51,26 @@ printf '%-32s %-6s %s\n' CHECK RESULT DETAIL
 result 'Accessibility' PASS 'already granted'
 if idle; then result 'Popup idle before' PASS 'no LightTTS windows'; else result 'Popup idle before' FAIL 'LightTTS window visible or enumeration failed'; fi
 record() {
-  popup=0; shortcut || return 1; sleep 1
+  popup=0
+  content=$(read_field) || return 1
+  [ -z "$content" ] || { echo "Test field was not initially empty: $content" >&2; return 1; }
+  shortcut || return 1; sleep 1
   [ "$(window_count)" -gt 0 ] 2>/dev/null && popup=1
   say -r 140 'The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.' & say_pid=$!
-  sleep 3
+  wait "$say_pid" || return 1; say_pid=""
   stop_ms=$(python3 -c 'import time; print(int(time.monotonic()*1000))')
   shortcut || { kill "$say_pid" 2>/dev/null || true; wait "$say_pid" 2>/dev/null || true; say_pid=""; return 1; }
-  kill "$say_pid" 2>/dev/null || true; wait "$say_pid" 2>/dev/null || true; say_pid=""
 }
 contains_speech() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | grep -Eq 'quick|brown|fox|lazy|dog'; }
 read_field() { "$D" read "$target" "$identity"; }
 wait_field() {
-  found=0; elapsed='no transcript in 30s'
+  found=0; elapsed='no matching transcript in 30s'
   for ((j=0; j<60; j++)); do
     content=$(read_field) || { elapsed="focus or AXValue unavailable for $identity"; return 1; }
     if contains_speech "$content"; then now=$(python3 -c 'import time; print(int(time.monotonic()*1000))'); elapsed="$((now-stop_ms)) ms"; found=1; break; fi
     sleep 0.5
   done
+  [ "$found" = 1 ] || printf 'Actual field value: %s\n' "$content" >&2
 }
 shot() { screencapture -x "/tmp/lt-shots/accept5-$1.png" || echo "FAIL: screenshot $1" >&2; }
 finish_popup() { if [ "$popup" = 1 ] && idle; then result "$1 popup lifecycle" PASS 'visible recording; absent 2s after'; else shot "$2-popup"; result "$1 popup lifecycle" FAIL 'missing during recording or visible 2s after'; fi; }
@@ -77,19 +81,16 @@ start_target() {
     printf '%s|%s|%s\n' "$target" "$identity" "$file" >> "$targets"
     open -a TextEdit "$file" || return 1
   else
+    file="/tmp/$identity.html"
+    (set -C; printf '<title>%s</title><label>Dictation test <input autofocus></label>\n' "$identity" > "$file") || return 1
     printf '%s|%s|%s\n' "$target" "$identity" "$file" >> "$targets"
-    open -a 'Google Chrome' --args --new-window "data:text/html,<title>$identity</title><input autofocus id=t>" || return 1
+    local chrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    [ -x "$chrome" ] || return 1
+    "$chrome" --user-data-dir="$TMP/chrome-profile" --no-first-run --no-default-browser-check --force-renderer-accessibility --new-window "file://$file" >/dev/null 2>&1 &
+    chrome_pid=$!
   fi
-  sleep 3
-  if ! focus; then
-    # Launch Services can ignore --args when Chrome is already running.
-    if [ "$target" = com.google.Chrome ]; then
-      local chrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-      [ -x "$chrome" ] || return 1
-      "$chrome" --new-window "data:text/html,<title>$identity</title><input autofocus id=t>" >/dev/null 2>&1 &
-      sleep 3; focus
-    else return 1; fi
-  fi
+  sleep 5
+  focus
 }
 close_target() {
   [ -z "$file" ] || rm -f -- "$file"
@@ -108,7 +109,7 @@ result 'Notes paste' SKIP 'new note window cannot be uniquely identified without
 result 'Notes popup lifecycle' SKIP 'Notes target unavailable'
 if start_target com.google.Chrome; then
   if record; then wait_field || true; else found=0; elapsed='focus verification failed'; fi
-  if [ "$found" = 1 ]; then result 'Chrome paste' PASS "speech in data URL field ($elapsed)"; else shot chrome; result 'Chrome paste' FAIL "$elapsed"; fi
+  if [ "$found" = 1 ]; then result 'Chrome paste' PASS "speech in page input ($elapsed)"; else shot chrome; result 'Chrome paste' FAIL "$elapsed"; fi
   finish_popup Chrome chrome; close_target
 else shot chrome; result 'Chrome paste' FAIL 'window or focus unavailable'; result 'Chrome popup lifecycle' FAIL 'run unavailable'; fi
 result 'Finder clipboard fallback' SKIP 'desktop has no uniquely identifiable test window'
@@ -119,7 +120,7 @@ if start_target com.apple.TextEdit; then
   close_target
   if idle; then result 'Esc popup idle' PASS 'no window 2s after'; else shot esc-idle; result 'Esc popup idle' FAIL 'window visible'; fi
 else shot esc; result 'Esc cancel' FAIL 'TextEdit unavailable'; result 'Esc popup idle' FAIL 'run unavailable'; fi
-if top -l 3 -s 5 -stats pid,command,cpu,power,idlew > "$TMP/top" 2>>"$TMP/errors"; then
+if idle && top -l 3 -s 5 -stats pid,command,cpu,power,idlew > "$TMP/top" 2>>"$TMP/errors"; then
   awk '$2 == "LightTTS" || $2 == "LightTTSEngine" {print}' "$TMP/top"
   if awk '/^PID / {sample++} sample >= 2 && ($2 == "LightTTS" || $2 == "LightTTSEngine") {seen=1; if ($2 == "LightTTS") app=1; if (($3+0)>1) bad=1} END {exit !(seen && app && !bad)}' "$TMP/top"; then result 'Idle CPU' PASS 'last two top samples <= 1%'; else result 'Idle CPU' FAIL 'missing app or CPU above 1%; see top rows'; fi
 else result 'Idle CPU' FAIL 'top failed'; fi

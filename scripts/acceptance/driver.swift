@@ -45,11 +45,8 @@ case "quit-superwhisper":
     }
     fail("SuperWhisper did not quit")
 case "focus", "read", "target-key", "target-option", "close":
-    guard args.count >= 4,
-        let app = NSRunningApplication.runningApplications(withBundleIdentifier: args[2]).first
-    else { fail("Target application unavailable") }
+    guard args.count >= 4 else { fail("Target application unavailable") }
     let identity = args[3]
-    let root = AXUIElementCreateApplication(app.processIdentifier)
     func attr(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
         return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success
@@ -65,11 +62,20 @@ case "focus", "read", "target-key", "target-option", "close":
         }
         return nil
     }
-    let matches = (attr(root, kAXWindowsAttribute) as? [AXUIElement] ?? []).filter {
-        (attr($0, kAXTitleAttribute) as? String ?? "").contains(identity)
+    let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: args[2]).flatMap
+    {
+        app -> [(NSRunningApplication, AXUIElement, AXUIElement)] in
+        let root = AXUIElementCreateApplication(app.processIdentifier)
+        let windows = attr(root, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        return windows.filter { (attr($0, kAXTitleAttribute) as? String ?? "").contains(identity) }
+            .map { (app, root, $0) }
     }
-    guard matches.count == 1, let window = matches.first else {
-        fail("Expected exactly one window containing \(identity), found \(matches.count)")
+    guard candidates.count == 1, let (app, root, window) = candidates.first else {
+        fail("Expected exactly one window containing \(identity), found \(candidates.count)")
+    }
+    if args[2] == "com.google.Chrome" {
+        _ = AXUIElementSetAttributeValue(root, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        usleep(1000000)  // Chrome populates the renderer accessibility tree asynchronously.
     }
     if args[1] == "close" {
         guard let button = attr(window, kAXCloseButtonAttribute),
@@ -101,7 +107,7 @@ case "focus", "read", "target-key", "target-option", "close":
         AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success
     else { fail("Cannot activate and raise test window") }
     func verified() -> Bool {
-        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == args[2],
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
             let focused = attr(root, kAXFocusedWindowAttribute),
             CFGetTypeID(focused) == AXUIElementGetTypeID()
         else { return false }
@@ -113,7 +119,22 @@ case "focus", "read", "target-key", "target-option", "close":
         usleep(100000)
     }
     guard verified() else { fail("Frontmost app or focused window identity mismatch") }
-    let field = find(window, 0) { element in
+    if args[1] == "focus" { exit(0) }
+    // Chrome has a text field in its toolbar; only target the page web area.
+    let fieldRoot: AXUIElement
+    if args[2] == "com.google.Chrome" {
+        guard
+            let webArea = find(
+                window, 0, { (attr($0, kAXRoleAttribute) as? String) == "AXWebArea" }
+            )
+        else {
+            fail("Cannot find Chrome page web area")
+        }
+        fieldRoot = webArea
+    } else {
+        fieldRoot = window
+    }
+    let field = find(fieldRoot, 0) { element in
         let role = attr(element, kAXRoleAttribute) as? String ?? ""
         return [kAXTextAreaRole, kAXTextFieldRole].contains(role)
             && attr(element, kAXValueAttribute) != nil
@@ -131,6 +152,10 @@ case "focus", "read", "target-key", "target-option", "close":
             AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
                 == .success, verified()
         else { fail("Cannot focus test text field safely") }
+        guard let focused = attr(root, kAXFocusedUIElementAttribute),
+            CFGetTypeID(focused) == AXUIElementGetTypeID(),
+            CFEqual(focused, field)
+        else { fail("Focused element is not the test field") }
         if args[1] == "target-option" {
             post(61, true, .maskAlternate)
             post(61, false)
