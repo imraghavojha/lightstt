@@ -12,12 +12,16 @@ import LightTTSCore
     private var settingsHost: NSHostingView<AnyView>?
     private let compactData = CompactMenuData()
     private var previousApp: NSRunningApplication?
+    private var lastExternalApp: NSRunningApplication?
     private var openingSettings = false
 
     init(app: AppController) {
         self.app = app
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        if frontmost?.processIdentifier != ProcessInfo.processInfo.processIdentifier { lastExternalApp = frontmost }
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(frontmostApplicationChanged(_:)), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         status.button?.image = makeStatusImage()
         status.button?.target = self
         status.button?.action = #selector(togglePopover)
@@ -81,7 +85,7 @@ import LightTTSCore
         updateContent()
         if let appearance = NSApp.appearance { button.appearance = appearance }
         let frontmost = NSWorkspace.shared.frontmostApplication
-        previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
+        previousApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? lastExternalApp : frontmost
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         UITrace.end("popover")
@@ -94,8 +98,8 @@ import LightTTSCore
         NSApp.activate(ignoringOtherApps: true)
         if let window { if !window.isVisible || window.isMiniaturized { settingsHost?.rootView = AnyView(SettingsView(controller: app).ignoresSafeArea()) }; if window.isMiniaturized { window.deminiaturize(nil) }; window.makeKeyAndOrderFront(nil) }
         else {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
-            w.standardWindowButton(.zoomButton)?.isHidden = true
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 750, height: 508), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+            w.minSize = NSSize(width: 750, height: 508)
             w.title = "LightTTS"; w.titleVisibility = .hidden; w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false; w.delegate = self; window = w
             let host = NSHostingView(rootView: AnyView(SettingsView(controller: app).ignoresSafeArea()))
@@ -108,7 +112,7 @@ import LightTTSCore
             }
             w.makeKeyAndOrderFront(nil)
             DispatchQueue.main.async {
-                for (button, x) in [(NSWindow.ButtonType.closeButton, 20.0), (.miniaturizeButton, 43.0)] {
+                for (button, x) in [(NSWindow.ButtonType.closeButton, 20.0), (.miniaturizeButton, 43.0), (.zoomButton, 66.0)] {
                     if let control = w.standardWindowButton(button) {
                         let shift = control.superview?.isFlipped == true ? 5.0 : -5.0
                         control.setFrameOrigin(NSPoint(x: x, y: 3 + shift))
@@ -124,8 +128,32 @@ import LightTTSCore
         guard !openingSettings, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
         previousApp?.activate()
     }
+    private func performRecordingAction() {
+        let state = app.state
+        let target = previousApp
+        let recordingDate = app.started
+        popover.performClose(nil) // popoverDidClose restores the previously active app
+        if state == "idle" || state == "recording" {
+            Task { @MainActor [weak self] in
+                // Activation is asynchronous. Stop must capture the external field,
+                // just as starting must leave the menu before taking the microphone.
+                if let target, !target.isTerminated {
+                    target.activate()
+                    for _ in 0..<10 {
+                        if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier { break }
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                    }
+                }
+                guard let self, self.app.state == state, self.app.started == recordingDate else { return }
+                if state == "idle" { self.app.toggleRecording() }
+                else { self.app.stop() }
+            }
+        } else if ["starting", "loading", "processing"].contains(state) {
+            app.cancel()
+        }
+    }
     private func updateContent() {
-        let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.openSettingsWindow() }, data: compactData)
+        let view = CompactMenuView(controller: app, openSettings: { [weak self] in self?.openSettingsWindow() }, recordingAction: { [weak self] in self?.performRecordingAction() }, cancelRecording: { [weak self] in self?.popover.performClose(nil); self?.app.cancel() }, data: compactData)
         let root: AnyView
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] {
             root = AnyView(view.environment(\.colorScheme, appearance == "light" ? .light : .dark))
@@ -134,6 +162,11 @@ import LightTTSCore
         let hosting = NSHostingController(rootView: root)
         if let appearance = ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_APPEARANCE"] { hosting.view.appearance = NSAppearance(named: appearance == "light" ? .aqua : .darkAqua) }
         compactHost = hosting; popover.contentViewController = hosting
+    }
+    @objc private func frontmostApplicationChanged(_ notification: Notification) {
+        guard let active = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              active.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        lastExternalApp = active
     }
     @objc private func applicationDidHide() { compactHost?.rootView = AnyView(EmptyView()); settingsHost?.rootView = AnyView(EmptyView()) }
     @objc private func applicationDidUnhide() {

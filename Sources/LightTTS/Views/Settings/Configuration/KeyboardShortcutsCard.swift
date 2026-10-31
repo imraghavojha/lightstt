@@ -30,7 +30,7 @@ extension ConfigurationPageView {
                     controller.objectWillChange.send()
                 } label: {
                     Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(.secondary)
-                }.buttonStyle(.plain)
+                }.buttonStyle(.plain).accessibilityLabel("Disable mouse shortcut").help("Disable mouse shortcut")
                 MouseShortcutRecorder().fixedSize().frame(height: 28)
             }.frame(minHeight: 50)
             PageRule()
@@ -68,7 +68,7 @@ extension ConfigurationPageView {
                 Image(systemName: enabled == nil ? "arrow.counterclockwise" : "xmark").font(
                     .system(size: 10)
                 ).foregroundStyle(.secondary)
-            }.buttonStyle(.plain)
+            }.buttonStyle(.plain).accessibilityLabel("\(enabled == nil ? "Reset" : "Disable") \(title) shortcut").help("\(enabled == nil ? "Reset" : "Disable") \(title) shortcut")
             ShortcutRecorder(
                 codeKey: key, modifiersKey: modifiers, fallbackCode: fallback, enabledKey: enabled
             ).fixedSize().frame(height: 28)
