@@ -11,7 +11,6 @@ struct SettingsView: View {
     @ObservedObject var controller: AppController
     @StateObject private var dialog = SettingsDialogState()
     @StateObject var devices = SettingsDevices()
-    @AppStorage("selectedModel") private var selectedModel = ModelDefaults.selectedModel
     @AppStorage("theme") private var theme = "Auto"
     @Environment(\.colorScheme) private var scheme
     private var effectiveTheme: String { ProcessInfo.processInfo.environment["LIGHTTTS_SCREENSHOT_APPEARANCE"] ?? theme }
@@ -37,6 +36,5 @@ struct SettingsView: View {
         .background(ConfirmationFrameOverlay(model: dialog.deleting, name: dialog.deleting?.name ?? "", cancel: { dialog.deleting = nil }, delete: { model in
             controller.deleteModel(model); dialog.deleting = nil
         }))
-        .onChange(of: selectedModel) { _ in controller.reloadSelectedModel() }
     }
 }

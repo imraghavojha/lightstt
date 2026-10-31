@@ -39,7 +39,7 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         defaults.set(false, forKey: "pushShortcutEnabled")
         defaults.set(-1, forKey: "mouseShortcut")
         NotificationCenter.default.post(name: .shortcutsChanged, object: nil)
-        precondition(toggle.title.contains("Space") && push.title == "Record shortcut" && mouse.title == "Record shortcut", "shortcut labels must refresh immediately")
+        precondition(toggle.title.contains("Space") && push.title == "Disabled — record shortcut" && mouse.title == "Record shortcut", "shortcut labels must refresh immediately")
         let replyScript = try script(#"""
         exec /usr/bin/python3 -c '
         import json, os, sys, time

@@ -130,14 +130,24 @@ import LightTTSCore
     }
     private func performRecordingAction() {
         let state = app.state
+        let target = previousApp
+        let recordingDate = app.started
         popover.performClose(nil) // popoverDidClose restores the previously active app
-        if state == "idle" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                guard let self, self.app.state == "idle" else { return }
-                self.app.toggleRecording()
+        if state == "idle" || state == "recording" {
+            Task { @MainActor [weak self] in
+                // Activation is asynchronous. Stop must capture the external field,
+                // just as starting must leave the menu before taking the microphone.
+                if let target, !target.isTerminated {
+                    target.activate()
+                    for _ in 0..<10 {
+                        if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier { break }
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                    }
+                }
+                guard let self, self.app.state == state, self.app.started == recordingDate else { return }
+                if state == "idle" { self.app.toggleRecording() }
+                else { self.app.stop() }
             }
-        } else if state == "recording" {
-            app.stop()
         } else if ["starting", "loading", "processing"].contains(state) {
             app.cancel()
         }
