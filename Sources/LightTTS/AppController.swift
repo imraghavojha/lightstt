@@ -49,8 +49,8 @@ import IOKit.ps
     private var warmingToken = UUID()
     private var warming: Task<any TranscriptionEngine, Error>?
 
-    private(set) var audio: AudioCapture?
-    private let audioSettings = AudioSettings()
+    private let captureService = CaptureService(factory: NativeCaptureDriverFactory())
+    private let audioDucking = AudioDuckingService(driver: NativeAudioDuckingDriver())
     private let isTestAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
 
     private var panel: NSPanel?
@@ -307,16 +307,20 @@ import IOKit.ps
         sessionAutoPaste = UserDefaults.standard.object(forKey: "autoPaste") as? Bool ?? true
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
             do {
-                let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.recordingLevel.value = value } }
-                try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
+                try startCapture()
+                started = Date()
+                state = "recording"
+                showPanel()
             } catch { fail(error.localizedDescription) }
             return
         }
         Task {
             if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil {
                 do {
-                    let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.recordingLevel.value = value } }
-                    try capture.start(); audio = capture; started = Date(); state = "recording"; showPanel()
+                    try startCapture()
+                    started = Date()
+                    state = "recording"
+                    showPanel()
                 } catch { fail(error.localizedDescription) }
                 return
             }
@@ -331,22 +335,53 @@ import IOKit.ps
             guard current == generation, state == "starting" else { return }
             guard allowed else { fail("Microphone access is required. Enable it in System Settings."); return }
             do {
-                let capture = AudioCapture { [weak self] value in Task { @MainActor in self?.recordingLevel.value = value } }
                 let manageAudio = !isTestAudio || ProcessInfo.processInfo.environment["LIGHTTTS_TEST_VOLUME"] == "1"
-                try capture.start()
+                try startCapture()
                 LaunchTrace.mark("capture-started")
-                panelDeadline?.cancel(); audio = capture; started = Date(); state = "recording"; if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }; showPanel()
+                panelDeadline?.cancel()
+                started = Date()
+                state = "recording"
+                if isTestAudio { UserDefaults.standard.set("recording", forKey: "testRecordingState") }
+                showPanel()
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == current, self.state == "recording" else { return }
-                    if manageAudio { self.audioSettings.begin { [weak self] warning in Task { @MainActor in
-                        guard let self, self.generation == current, self.state == "recording" else { return }
-                        self.message = warning ?? ""
-                    } } }
+                    if manageAudio {
+                        self.audioDucking.begin(session: SessionID(generation: UInt64(current)), options: self.duckingOptions()) { [weak self] warning in
+                            guard let self, self.generation == current, self.state == "recording" else { return }
+                            self.message = warning ?? ""
+                        }
+                    }
                     AudioSettings.cue(start: true)
                 }
             } catch { fail(error.localizedDescription) }
         }
     }
+    private func startCapture() throws {
+        let deviceUID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
+        try captureService.start(deviceUID: deviceUID) { [weak self] value in
+            self?.recordingLevel.value = value
+        }
+    }
+
+    private func duckingOptions() -> DuckingOptions {
+        let defaults = UserDefaults.standard
+        let mode: DuckingOptions.Mode
+        switch defaults.string(forKey: "recordingSound") ?? "Pause" {
+        case "Pause": mode = .pause
+        case "Mute": mode = .mute
+        case "Lower": mode = .lower
+        default: mode = .none
+        }
+        return DuckingOptions(
+            mode: mode,
+            increaseMicrophoneVolume: defaults.bool(forKey: "increaseMicVolume")
+        )
+    }
+
+    private func endDucking() {
+        audioDucking.end(session: SessionID(generation: UInt64(generation)))
+    }
+
     func stop() {
         guard state == "recording" else { return }
         LaunchTrace.mark("stop-enter")
@@ -357,7 +392,8 @@ import IOKit.ps
         let stopShiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
         let stopFocusTask = Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID, shiftHeld: stopShiftHeld) }
         LaunchTrace.mark("recording-stopped")
-        let rawSamples = testAudio ?? audio?.stop() ?? []
+        let finishedCapture = captureService.stop()
+        let rawSamples = testAudio ?? finishedCapture?.pcm.samples ?? []
         LaunchTrace.mark("capture-stopped")
         let elapsed = Date().timeIntervalSince(started)
         let recordingDate = started, recordDuration = Double(rawSamples.count) / 16000
@@ -366,9 +402,14 @@ import IOKit.ps
         let processingStart = Date()
         // AVAudioEngine teardown can block the main thread; retain the stopped capture
         // until after text insertion instead of releasing it on the stop path.
-        let finishedCapture = audio
         LaunchTrace.mark("stop-setup-start")
-        testAudio = nil; audio = nil; audioSettings.end(); AudioSettings.cue(start: false); state = "processing"; runPendingHistoryReprocess(); if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }; let current = generation
+        testAudio = nil
+        endDucking()
+        AudioSettings.cue(start: false)
+        state = "processing"
+        runPendingHistoryReprocess()
+        if isTestAudio { UserDefaults.standard.set("processing", forKey: "testRecordingState") }
+        let current = generation
         LaunchTrace.mark("stop-setup-end")
         armPanelDeadline(seconds: 330, generation: current, message: "Transcription timed out. Try recording again.")
         let usedPushToTalk = recordingUsesPushToTalk
@@ -475,7 +516,20 @@ import IOKit.ps
         }
     }
 
-    func cancel() { panelDeadline?.cancel(); message = ""; audioSettings.end(); generation += 1; processing?.cancel(); processing = nil; _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; unloadEngine(); hide(); runPendingHistoryReprocess() }
+    func cancel() {
+        panelDeadline?.cancel()
+        message = ""
+        endDucking()
+        generation += 1
+        processing?.cancel()
+        processing = nil
+        captureService.cancel()
+        testAudio = nil
+        recordingUsesPushToTalk = false
+        unloadEngine()
+        hide()
+        runPendingHistoryReprocess()
+    }
 
     private func hideImmediately() {
         recordingLevel.value = 0; panel?.orderOut(nil)
@@ -522,9 +576,12 @@ import IOKit.ps
     }
     func fail(_ text: String) {
         panelDeadline?.cancel()
-        audioSettings.end()
+        endDucking()
         generation += 1; processing?.cancel(); processing = nil
-        _ = audio?.stop(); audio = nil; testAudio = nil; recordingUsesPushToTalk = false; recordingLevel.value = 0
+        captureService.cancel()
+        testAudio = nil
+        recordingUsesPushToTalk = false
+        recordingLevel.value = 0
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
         unloadEngine(); message = text; state = "error"; showPanel(); runPendingHistoryReprocess()
         let current = generation
@@ -780,12 +837,12 @@ import IOKit.ps
     func beginQuit() {
         downloadTask?.cancel(); processing?.cancel(); warming?.cancel()
         pendingHistoryReprocess = nil
-        audioSettings.end()
+        endDucking()
         if state != "idle" { cancel() }
         unloadEngine()
     }
     func finishQuit() async {
-        await audioSettings.waitForRestoration()
+        await audioDucking.waitForRestoration()
         await withCheckedContinuation { continuation in historyQueue.async { continuation.resume() } }
         await downloadTask?.value
     }
