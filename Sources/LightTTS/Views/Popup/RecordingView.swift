@@ -64,8 +64,13 @@ struct RecordingView: View {
         .padding(.vertical, isError ? 10 : 0)
         .frame(width: capsuleWidth, height: isError ? nil : (idle ? 8 : 32))
         .frame(minHeight: isError ? 32 : 0)
-        .background(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255), in: Capsule())
-        .overlay(Capsule().strokeBorder(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255), lineWidth: 1))
+        .background {
+            Capsule().fill(idle ? Color(red: 79/255, green: 79/255, blue: 80/255) : Color(red: 64/255, green: 64/255, blue: 64/255))
+                .overlay {
+                    Capsule().fill(idle ? Color(red: 31/255, green: 31/255, blue: 34/255) : Color(red: 11/255, green: 11/255, blue: 12/255))
+                        .padding(1)
+                }
+        }
         .shadow(color: idle ? .clear : .black.opacity(0.12), radius: 6, y: 4)
         .offset(y: idle ? 0 : -9.5)
         .animation(.easeOut(duration: 0.15), value: idle)
