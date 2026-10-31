@@ -76,6 +76,10 @@ final class ShortcutButton: NSButton {
         if let warning { let alert = NSAlert(); alert.messageText = warning; alert.informativeText = "Choose another shortcut before resetting."; alert.runModal() }
     }
     private func finish() { recording = false; Self.isRecording = false; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil); refresh(); window?.makeFirstResponder(nil) }
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil && recording { finish() }
+        super.viewWillMove(toWindow: newWindow)
+    }
     override func resignFirstResponder() -> Bool { let wasRecording = recording; recording = false; Self.isRecording = false; if wasRecording { NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil) }; refresh(); return super.resignFirstResponder() }
     func refresh() {
         guard !recording else { return }
@@ -150,6 +154,10 @@ final class MouseShortcutButton: NSButton {
         super.keyDown(with: event)
     }
     override func otherMouseDown(with event: NSEvent) { guard Self.isRecording else { super.otherMouseDown(with: event); return }; SettingsDefaults.store.set(event.buttonNumber, forKey: "mouseShortcut"); Self.isRecording = false; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil); refresh(); window?.makeFirstResponder(nil) }
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil && Self.isRecording { Self.isRecording = false; NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil) }
+        super.viewWillMove(toWindow: newWindow)
+    }
     override func resignFirstResponder() -> Bool { let wasRecording = Self.isRecording; Self.isRecording = false; if wasRecording { NotificationCenter.default.post(name: .shortcutCaptureChanged, object: nil) }; refresh(); return super.resignFirstResponder() }
     override var intrinsicContentSize: NSSize { NSSize(width: max(90, ceil((title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]).width) + 4), height: 28) }
     func refresh() { guard !Self.isRecording else { return }; let value = SettingsDefaults.store.object(forKey: "mouseShortcut") as? Int ?? -1; title = value < 0 ? "Record shortcut" : "Mouse \(value + 1)"; setAccessibilityLabel("Edit mouse shortcut, \(value < 0 ? "disabled" : "Mouse \(value + 1)")"); toolTip = "Edit mouse shortcut. Press Escape to cancel."; font = .systemFont(ofSize: 12, weight: .medium); contentTintColor = .secondaryLabelColor; invalidateIntrinsicContentSize() }
