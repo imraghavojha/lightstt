@@ -20,6 +20,8 @@ public final class HistoryPersistence {
         pending[name] = data
     }
 
+    public func discardRecording(named name: String) { pending.removeValue(forKey: name) }
+
     public func save(_ history: Data, in folder: URL, fallback: URL?) -> (
         folder: URL, fellBack: Bool, error: Error?
     ) {

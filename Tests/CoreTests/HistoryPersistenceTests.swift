@@ -19,6 +19,16 @@ final class HistoryPersistenceTests: XCTestCase {
         XCTAssertEqual(written["history.json"], Data([3]))
     }
 
+    func testDeletedPendingAudioIsNotRetried() {
+        var writes: [String] = []
+        let persistence = HistoryPersistence { _, url in writes.append(url.lastPathComponent) }
+        persistence.enqueueRecording(Data([1]), named: "deleted.wav")
+        persistence.discardRecording(named: "deleted.wav")
+        let result = persistence.save(Data(), in: URL(fileURLWithPath: "/history"), fallback: nil)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(writes, ["history.json"])
+    }
+
     func testJSONFailureRetainsAudioForRetry() {
         let folder = URL(fileURLWithPath: "/history")
         var failJSON = true

@@ -110,6 +110,40 @@ enum LaunchTrace { static func mark(_ text: String) {} }
         UserDefaults.standard.set("Classic", forKey: "recordingWindow")
         let controller = AppController()
         precondition(UserDefaults.standard.string(forKey: "recordingWindow") == "Mini", "Classic must migrate to Mini")
+        // Freeze the serial preparation after delivery, then exercise a new session,
+        // deletion, migration, and quit while the old recording is still pending.
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        controller.historyPreparationHook = { entered.signal(); release.wait() }
+        controller.showPreviewState("processing")
+        let first = HistoryEntry(text: "delivered", date: Date())
+        controller.commitDelivered(first, samples: [Float](repeating: 0.2, count: 16000), warning: nil, copied: false)
+        precondition(entered.wait(timeout: .now() + 5) == .success)
+        precondition(controller.state == "idle" && controller.history.contains(where: { $0.id == first.id }))
+        do { try controller.changeHistoryFolder(FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)); fatalError("migration must wait for preparation") } catch {}
+        controller.start()
+        precondition(controller.state == "recording", "next session must start while history preparation is blocked")
+        controller.cancel()
+        precondition(controller.history.contains(where: { $0.id == first.id }), "new session cancellation must not discard delivered history")
+        let second = HistoryEntry(text: "later", date: first.date.addingTimeInterval(1))
+        controller.commitDelivered(second, samples: nil, warning: nil, copied: true)
+        precondition(controller.history.first?.id == second.id)
+        controller.deleteHistory(first.id)
+        controller.historyPreparationHook = nil
+        let third = HistoryEntry(text: "kept", date: first.date.addingTimeInterval(2))
+        controller.commitDelivered(third, samples: [Float](repeating: 0.3, count: 32000), warning: nil, copied: false)
+        controller.beginQuit()
+        release.signal()
+        await controller.finishQuit()
+        let disk = try JSONDecoder().decode([HistoryEntry].self, from: Data(contentsOf: controller.historyURL))
+        precondition(disk.contains(where: { $0.id == second.id }) && !disk.contains(where: { $0.id == first.id }), "quit must flush deletion without resurrecting old history")
+        let savedThird = disk.first { $0.id == third.id }!
+        precondition(savedThird.waveform != nil && savedThird.segments != nil)
+        precondition(FileManager.default.fileExists(atPath: controller.historyURL.deletingLastPathComponent().appendingPathComponent("Recordings/" + third.id.uuidString + ".wav").path), "quit must flush committed audio")
+        controller.deleteHistory(second.id); controller.deleteHistory(third.id)
+        await controller.finishQuit()
+        precondition(!FileManager.default.fileExists(atPath: controller.historyURL.deletingLastPathComponent().appendingPathComponent("Recordings/" + first.id.uuidString + ".wav").path))
+        controller.historyPreparationHook = nil
+        print("delayed history delivery, new session, migration guard, deletion and quit checks passed")
         controller.start()
         precondition(controller.state == "recording" && controller.recordingPanelVisible)
         UserDefaults.standard.set("None", forKey: "recordingWindow")
