@@ -606,6 +606,8 @@ import IOKit.ps
         if panel == nil {
             let p = RecordingPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
             p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
+            // AppKit otherwise animates panel ordering for ~0.5 s, so a cancelled popup lingers.
+            p.animationBehavior = .none
             p.onMoved = { center in RecordingPanelPlacement.save(center: center) }
             let view = RecordingHUDView(frame: NSRect(x: 0, y: 0, width: 400, height: 160))
             view.autoresizingMask = [.width, .height]
