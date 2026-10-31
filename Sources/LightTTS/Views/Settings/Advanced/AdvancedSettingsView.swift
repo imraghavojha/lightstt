@@ -19,7 +19,7 @@ extension ConfigurationPageView {
                                 : [Color(white: 0.99), Color(white: 0.92)], startPoint: .top,
                             endPoint: .bottom), in: Circle()
                     ).overlay(Circle().stroke(Color.primary.opacity(0.16), lineWidth: 0.5))
-                }.buttonStyle(.plain).help("Back to Configuration")
+                }.buttonStyle(.responsive).help("Back to Configuration")
                 Text("Advanced settings").font(.system(size: 13, weight: .bold))
                 Spacer()
             }.padding(.horizontal, 12).frame(height: 48)

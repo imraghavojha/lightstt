@@ -75,7 +75,7 @@ struct ModelsPageView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Search models", text: $ui.query).textFieldStyle(.plain)
-                        if !ui.query.isEmpty { Button { ui.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).help("Clear search") }
+                        if !ui.query.isEmpty { Button { ui.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.responsive).help("Clear search") }
                     }.font(.system(size: 13)).padding(.horizontal, 10).frame(width: 220, height: 28).background(LinearGradient(stops: colorScheme == .dark ? [
                         .init(color: Color(red: 74/255, green: 74/255, blue: 82/255), location: 0),
                         .init(color: Color(red: 68/255, green: 69/255, blue: 74/255), location: 0.35),
@@ -143,9 +143,9 @@ struct ModelsPageView: View {
                 }.font(.system(size: 11, weight: .medium)).foregroundStyle(colorScheme == .dark ? Color(red: 118/255, green: 120/255, blue: 123/255) : Color(red: 76/255, green: 76/255, blue: 76/255)).padding(.leading, 56).padding(.trailing, compact ? 18 : 37).padding(.top, 20).padding(.bottom, 8)
                 ScrollView { LazyVStack(spacing: 0) { ForEach(ui.visible) { model in
                     HStack(spacing: 8) {
-                        Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(Color.secondary).frame(width: 24) }.buttonStyle(.plain)
+                        Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(Color.secondary).frame(width: 24) }.buttonStyle(.responsive)
                         provider(model)
-                        Button { ui.detail = model } label: { HStack(spacing: 4) { Text(displayName(model)).lineLimit(1); if model.id.contains(".en") { Text("EN").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary).frame(width: 19, height: 14).background(Color.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 4)) } } }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { ui.detail = model } label: { HStack(spacing: 4) { Text(displayName(model)).lineLimit(1); if model.id.contains(".en") { Text("EN").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary).frame(width: 19, height: 14).background(Color.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 4)) } } }.buttonStyle(.responsive).frame(maxWidth: .infinity, alignment: .leading)
                         Image(systemName: "waveform").foregroundStyle(.secondary).frame(width: 24, height: 21).background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 5)).frame(width: compact ? 30 : 42, alignment: .leading)
                         ratings(model).frame(width: compact ? 85 : 112, alignment: .leading)
                         HStack(spacing: 6) {
@@ -162,15 +162,15 @@ struct ModelsPageView: View {
     }
     private func compare<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult { a == b ? .orderedSame : (a < b ? .orderedAscending : .orderedDescending) }
     private func sortHeader(_ title: String) -> some View {
-        Button { if ui.sortColumn == title { ui.ascending.toggle() } else { ui.sortColumn = title; ui.ascending = true } } label: { HStack(spacing: 3) { Text(title); if ui.sortColumn == title || (ui.sortColumn.isEmpty && title == "Model name") { Image(systemName: ui.ascending ? "chevron.up" : "chevron.down").font(.system(size: 8)) } } }.buttonStyle(.plain)
+        Button { if ui.sortColumn == title { ui.ascending.toggle() } else { ui.sortColumn = title; ui.ascending = true } } label: { HStack(spacing: 3) { Text(title); if ui.sortColumn == title || (ui.sortColumn.isEmpty && title == "Model name") { Image(systemName: ui.ascending ? "chevron.up" : "chevron.down").font(.system(size: 8)) } } }.buttonStyle(.responsive)
     }
     private func detailView(_ model: Model) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
-                Button { ui.detail = nil } label: { Image(systemName: "chevron.left").font(.system(size: 12)) }.buttonStyle(.plain).frame(width: 20, height: 28).offset(y: -4)
+                Button { ui.detail = nil } label: { Image(systemName: "chevron.left").font(.system(size: 12)) }.buttonStyle(.responsive).frame(width: 20, height: 28).offset(y: -4)
                 Spacer(); provider(model).offset(y: -9)
                 VStack(alignment: .leading, spacing: 1) { Text(displayName(model)).font(.system(size: 13, weight: .bold)); Text(subtitle(model)).font(.system(size: 10)).foregroundStyle(.secondary) }.offset(y: -4)
-                Spacer(); Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(.secondary) }.buttonStyle(.plain).offset(y: -4)
+                Spacer(); Button { toggleFavorite(model) } label: { Image(systemName: favoriteIDs.contains(model.id) ? "star.fill" : "star").foregroundStyle(.secondary) }.buttonStyle(.responsive).offset(y: -4)
             }
             Text(engineDescription(model)).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 0) {
@@ -186,7 +186,7 @@ struct ModelsPageView: View {
             HStack(spacing: 8) {
                 if ui.installed?.contains(model.id) == true {
                     Button(selectedModel == model.id ? "Selected" : "Use in all modes") { selectedModel = model.id; controller.reloadSelectedModel() }.buttonStyle(FooterButton()).disabled(selectedModel == model.id)
-                    Button { deleting = model } label: { Image(systemName: "trash.fill").frame(width: 28, height: 28).background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain).disabled(controller.busyModel != nil)
+                    Button { deleting = model } label: { Image(systemName: "trash.fill").frame(width: 28, height: 28).background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.responsive).disabled(controller.busyModel != nil)
                 } else if controller.busyModel == model.id && controller.modelOperation != nil { ProgressView().controlSize(.small) }
                 else if controller.busyModel == model.id { ModelProgressView(progress: controller.modelProgress, cancel: controller.cancelDownload, detail: true) }
                 else { Button("Download · \(size(model))") { controller.download(model) }.buttonStyle(FooterButton()).disabled(controller.busyModel != nil || ui.installed == nil) }
@@ -225,7 +225,7 @@ struct ModelsPageView: View {
         let installed = ui.installed?.contains(model.id) == true
         return Button { if installed { deleting = model } else { controller.download(model) } } label: {
             Image(systemName: installed ? "trash.fill" : "arrow.down").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 15, height: 15).background(installed ? Color.clear : Color.primary.opacity(0.07), in: Circle()).frame(width: 21, height: 21).background(installed ? Color.primary.opacity(0.08) : .clear, in: Circle()).overlay(Circle().stroke(installed ? .clear : Color.primary.opacity(0.35), lineWidth: 1))
-        }.buttonStyle(.plain).disabled(controller.busyModel != nil || ui.installed == nil).help(installed ? "Delete" : "Download")
+        }.buttonStyle(.responsive).disabled(controller.busyModel != nil || ui.installed == nil).help(installed ? "Delete" : "Download")
     }
     private func toggleFavorite(_ model: Model) { var ids = favoriteIDs; if !ids.insert(model.id).inserted { ids.remove(model.id) }; favorites = ids.sorted().joined(separator: ",") }
 }
@@ -348,7 +348,7 @@ private struct ModelProgressView: View {
             if detail { Spacer() }
             Button(action: cancel) {
                 ZStack { Circle().stroke(Color.primary.opacity(0.18), lineWidth: 1.5); Circle().fill(Color.primary.opacity(0.08)).padding(3); Circle().trim(from: 0, to: min(max(progress.value, 0), 1)).stroke(Color.primary.opacity(0.75), style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).rotationEffect(.degrees(-90)); Image(systemName: "xmark").font(.system(size: 8, weight: .semibold)) }.frame(width: 22, height: 22)
-            }.buttonStyle(.plain).help("Cancel download")
+            }.buttonStyle(.responsive).help("Cancel download")
         }
     }
 }

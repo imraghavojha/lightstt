@@ -30,7 +30,7 @@ extension ConfigurationPageView {
                                     ? "chevron.down" : "chevron.right"
                             ).foregroundStyle(.secondary)
                         }.frame(height: 48).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.responsive)
                 }.padding(.top, 18)
                 if !controller.message.isEmpty {
                     InlineStatus(message: controller.message, dismiss: { controller.message = "" })

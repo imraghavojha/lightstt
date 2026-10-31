@@ -12,6 +12,7 @@ struct SettingsView: View {
     @StateObject private var dialog = SettingsDialogState()
     @StateObject var devices = SettingsDevices()
     @AppStorage("theme") private var theme = "Auto"
+    @AppStorage("inputDeviceUID", store: SettingsDefaults.store) var selectedInput = ""
     @Environment(\.colorScheme) private var scheme
     private var effectiveTheme: String { ProcessInfo.processInfo.environment["LIGHTTTS_SCREENSHOT_APPEARANCE"] ?? theme }
     var dark: Bool { effectiveTheme == "Dark" || (effectiveTheme == "Auto" && scheme == .dark) }

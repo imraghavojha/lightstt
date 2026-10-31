@@ -57,7 +57,9 @@ import IOKit.ps
     private let insertionService = makeNativeInsertionService()
     private let isTestAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
 
-    private var panel: NSPanel?
+    private var panel: RecordingPanel?
+    private let panelLayout = RecordingPanelLayout()
+    private var panelHide: DispatchWorkItem?
     private var panelDeadline: Task<Void, Never>?
     var recordingPanelVisible: Bool { panel?.isVisible ?? false }
     var recordingPanelTransparent: Bool { panel?.isOpaque == false && panel?.contentView?.layer?.isOpaque == false }
@@ -415,6 +417,8 @@ import IOKit.ps
         armPanelDeadline(seconds: 330, generation: current, message: "Transcription timed out. Try recording again.")
         let usedPushToTalk = recordingUsesPushToTalk
         recordingUsesPushToTalk = false
+        // An accidental tap or empty take just closes; only real input faults are reported.
+        if elapsed < 0.5 { dismissSilently(); return }
         if let error = AudioProcessing.recordingError(samples: rawSamples, duration: elapsed, pushToTalk: usedPushToTalk) { fail(error); return }
 
         LaunchTrace.mark("processing-task-enqueued")
@@ -439,13 +443,13 @@ import IOKit.ps
                 LaunchTrace.mark("audio-processing-start")
                 let samples = await Task.detached(priority: .userInitiated) { AudioProcessing.apply(rawSamples, removeSilence: remove, normalize: normalize) }.value
                 LaunchTrace.mark("audio-processing-end")
-                guard !samples.isEmpty else { throw SpeechError.audio("No speech detected. Try speaking louder or turn off silence removal.") }
+                guard !samples.isEmpty else { if current == generation { dismissSilently() }; return }
                 LaunchTrace.mark("inference-start")
                 let text = try await transcriptionService.transcribe(PCM16k(samples: samples), using: configuration, purpose: .live)
                 LaunchTrace.mark("inference-finished")
 
                 guard current == generation else { return }
-                guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
+                guard !text.isEmpty else { dismissSilently(); return }
                 if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
                     print("LIGHTTTS_TEST transcription completed, samples: \(samples.count)")
                     state = "done"
@@ -533,6 +537,20 @@ import IOKit.ps
         runPendingHistoryReprocess()
     }
 
+    /// Ends a session that produced no speech without an error popup or an engine reload.
+    private func dismissSilently() {
+        panelDeadline?.cancel()
+        message = ""
+        endDucking()
+        generation += 1
+        processing = nil
+        captureService.cancel()
+        testAudio = nil
+        recordingUsesPushToTalk = false
+        hide()
+        runPendingHistoryReprocess()
+    }
+
     private func hideImmediately() {
         recordingLevel.value = 0; panel?.orderOut(nil)
     }
@@ -541,9 +559,18 @@ import IOKit.ps
         state = "idle"; recordingLevel.value = 0
         if onACPower { warmSelected() }
         scheduleEngineUnload()
-        panel?.orderOut(nil)
+        if panelLayout.island != nil, panel?.isVisible == true {
+            // Let the island retract into the notch before the panel goes away.
+            let work = DispatchWorkItem { [weak self] in if self?.state == "idle" { self?.panel?.orderOut(nil) } }
+            panelHide = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        } else { panel?.orderOut(nil) }
     }
     func refreshRecordingWindow() { if state != "idle" { showPanel() } else { panel?.orderOut(nil) } }
+    func resetRecordingWindowPosition() {
+        UserDefaults.standard.removeObject(forKey: RecordingPanelPlacement.key)
+        if let p = panel, p.isVisible, panelLayout.island == nil, let origin = RecordingPanelPlacement.origin(for: p.frame.size) { p.setFrameOrigin(origin) }
+    }
     func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; recordingLevel.value = 0; showPanel() }
     private func dismissPanel() {
         panel?.orderOut(nil)
@@ -580,9 +607,11 @@ import IOKit.ps
     }
     private func preparePanel() {
         if panel == nil {
-            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
-            p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
-            let host = NSHostingView(rootView: RecordingView(controller: self))
+            let p = RecordingPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+            p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
+            p.onMoved = { center in RecordingPanelPlacement.save(center: center) }
+            let host = NSHostingView(rootView: RecordingPanelRoot(controller: self, layout: panelLayout))
+            host.sizingOptions = []
             host.wantsLayer = true; host.layer?.isOpaque = false; host.layer?.backgroundColor = NSColor.clear.cgColor
             p.contentView = host; panel = p
             p.contentView?.layoutSubtreeIfNeeded()
@@ -590,13 +619,28 @@ import IOKit.ps
     }
     private func showPanel() {
         guard state != "idle" else { panel?.orderOut(nil); return }
-        if UserDefaults.standard.string(forKey: "recordingWindow") == "None", state != "error" { panel?.orderOut(nil); return }
+        let style = UserDefaults.standard.string(forKey: "recordingWindow") ?? "Mini"
+        if style == "None", state != "error" { panel?.orderOut(nil); return }
         preparePanel()
-        if let frame = NSScreen.main?.visibleFrame, let p = panel { p.setFrameOrigin(NSPoint(x: frame.midX - p.frame.width / 2, y: frame.minY + 70));
-            if !p.isVisible { p.alphaValue = 1; p.orderFrontRegardless(); LaunchTrace.mark("panel-ordered-front") }
-            else { p.alphaValue = 1 } }
+        guard let p = panel else { return }
+        panelHide?.cancel(); panelHide = nil
+        if style == "Island", let island = IslandMetrics.current() {
+            if panelLayout.island != island { panelLayout.island = island }
+            p.allowsDragging = false
+            if p.frame != island.panelFrame { p.setFrame(island.panelFrame, display: true) }
+        } else {
+            let wasIsland = panelLayout.island != nil
+            if wasIsland { panelLayout.island = nil }
+            p.allowsDragging = true
+            if !p.isVisible || wasIsland {
+                // Only position on appearance, so a window the user is dragging stays put.
+                let size = NSSize(width: p.frame.width, height: 160)
+                if let origin = RecordingPanelPlacement.origin(for: size) { p.setFrame(NSRect(origin: origin, size: size), display: false) }
+            }
+        }
+        p.alphaValue = 1
+        if !p.isVisible { p.orderFrontRegardless(); LaunchTrace.mark("panel-ordered-front") }
     }
-
     func pruneHistory() { guard historyMigration == nil else { return }; let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; deleteRecordings(removed); history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
     func refreshLoginStatus() { loginEnabled = SMAppService.mainApp.status == .enabled }
     func setLoginEnabled(_ enabled: Bool) {
