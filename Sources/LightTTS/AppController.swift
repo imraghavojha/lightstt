@@ -12,17 +12,15 @@ import Darwin
 import IOKit.ps
 
 
-@MainActor final class RecordingLevel: ObservableObject { @Published var value: Float = 0 }
 @MainActor final class ModelProgress: ObservableObject { @Published var value: Double = 0 }
 
 @MainActor final class AppController: NSObject, ObservableObject {
-    @Published var state = "idle" { didSet { hotkey.setRecording(CancelRegistrationState.isActiveSession(state)); updateResidency() } }
+    @Published var state = "idle" { didSet { guard oldValue != state else { return }; hotkey.setRecording(CancelRegistrationState.isActiveSession(state)); updateResidency(); refreshHUD() } }
     @Published var settingsSelection = "Sound"
     private var previousSettingsSelection = "Sound"
-    let recordingLevel = RecordingLevel()
     @Published var started = Date()
-    @Published var message = ""
-    @Published var copiedToClipboard = false
+    @Published var message = "" { didSet { if oldValue != message { refreshHUD() } } }
+    @Published var copiedToClipboard = false { didSet { if oldValue != copiedToClipboard { refreshHUD() } } }
     @Published var history: [HistoryEntry] = []
     @Published var historyWarning: String?
     @Published var historySearch = ""
@@ -58,10 +56,10 @@ import IOKit.ps
     private let isTestAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
 
     private var panel: RecordingPanel?
-    private let panelLayout = RecordingPanelLayout()
+    private var hud: RecordingHUDView?
     private var panelHide: DispatchWorkItem?
     private var panelDeadline: Task<Void, Never>?
-    var recordingPanelVisible: Bool { panel?.isVisible ?? false }
+    var recordingPanelVisible: Bool { panel?.isVisible == true && panelHide == nil }
     var recordingPanelTransparent: Bool { panel?.isOpaque == false && panel?.contentView?.layer?.isOpaque == false }
     private let hotkey = HotkeyMonitor()
     private var processing: Task<Void, Never>?
@@ -366,7 +364,7 @@ import IOKit.ps
     private func startCapture() throws {
         let deviceUID = UserDefaults.standard.string(forKey: "inputDeviceUID") ?? ""
         try captureService.start(deviceUID: deviceUID) { [weak self] value in
-            self?.recordingLevel.value = value
+            self?.hud?.setLevel(value)
         }
     }
 
@@ -552,16 +550,16 @@ import IOKit.ps
     }
 
     private func hideImmediately() {
-        recordingLevel.value = 0; panel?.orderOut(nil)
+        panel?.orderOut(nil)
     }
 
     private func hide() {
-        state = "idle"; recordingLevel.value = 0
+        state = "idle"
         if onACPower { warmSelected() }
         scheduleEngineUnload()
-        if panelLayout.island != nil, panel?.isVisible == true {
+        if case .island = hud?.style, panel?.isVisible == true {
             // Let the island retract into the notch before the panel goes away.
-            let work = DispatchWorkItem { [weak self] in if self?.state == "idle" { self?.panel?.orderOut(nil) } }
+            let work = DispatchWorkItem { [weak self] in self?.panelHide = nil; if self?.state == "idle" { self?.panel?.orderOut(nil) } }
             panelHide = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
         } else { panel?.orderOut(nil) }
@@ -569,9 +567,9 @@ import IOKit.ps
     func refreshRecordingWindow() { if state != "idle" { showPanel() } else { panel?.orderOut(nil) } }
     func resetRecordingWindowPosition() {
         UserDefaults.standard.removeObject(forKey: RecordingPanelPlacement.key)
-        if let p = panel, p.isVisible, panelLayout.island == nil, let origin = RecordingPanelPlacement.origin(for: p.frame.size) { p.setFrameOrigin(origin) }
+        if let p = panel, p.isVisible, hud?.style == .mini, let origin = RecordingPanelPlacement.origin(for: p.frame.size) { p.setFrameOrigin(origin) }
     }
-    func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; recordingLevel.value = 0; showPanel() }
+    func showPreviewState(_ previewState: String) { state = previewState; message = "Microphone access is required."; showPanel() }
     private func dismissPanel() {
         panel?.orderOut(nil)
     }
@@ -587,7 +585,6 @@ import IOKit.ps
         captureService.cancel()
         testAudio = nil
         recordingUsesPushToTalk = false
-        recordingLevel.value = 0
         if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_TRACE"] == "1" { fputs("LightTTS error: \(text)\n", stderr) }
         unloadEngine(); message = text; state = "error"; showPanel(); runPendingHistoryReprocess()
         let current = generation
@@ -607,39 +604,43 @@ import IOKit.ps
     }
     private func preparePanel() {
         if panel == nil {
-            let p = RecordingPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+            let p = RecordingPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
             p.isFloatingPanel = true; p.level = NSWindow.Level(rawValue: 27); p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = false
             p.onMoved = { center in RecordingPanelPlacement.save(center: center) }
-            let host = NSHostingView(rootView: RecordingPanelRoot(controller: self, layout: panelLayout))
-            host.sizingOptions = []
-            host.wantsLayer = true; host.layer?.isOpaque = false; host.layer?.backgroundColor = NSColor.clear.cgColor
-            p.contentView = host; panel = p
-            p.contentView?.layoutSubtreeIfNeeded()
+            let view = RecordingHUDView(frame: NSRect(x: 0, y: 0, width: 400, height: 160))
+            view.autoresizingMask = [.width, .height]
+            view.onCancel = { [weak self] in self?.cancel() }
+            p.contentView = view; panel = p; hud = view
         }
+    }
+    private func refreshHUD() {
+        guard let hud, panel?.isVisible == true else { return }
+        hud.apply(state: state, message: message, copied: copiedToClipboard, appearing: false)
     }
     private func showPanel() {
         guard state != "idle" else { panel?.orderOut(nil); return }
         let style = UserDefaults.standard.string(forKey: "recordingWindow") ?? "Mini"
         if style == "None", state != "error" { panel?.orderOut(nil); return }
         preparePanel()
-        guard let p = panel else { return }
+        guard let p = panel, let hud else { return }
+        let wasHiding = panelHide != nil
         panelHide?.cancel(); panelHide = nil
+        let appearing = !p.isVisible || wasHiding
         if style == "Island", let island = IslandMetrics.current() {
-            if panelLayout.island != island { panelLayout.island = island }
             p.allowsDragging = false
-            if p.frame != island.panelFrame { p.setFrame(island.panelFrame, display: true) }
+            if p.frame != island.panelFrame { p.setFrame(island.panelFrame, display: false) }
+            hud.setStyle(.island(island))
         } else {
-            let wasIsland = panelLayout.island != nil
-            if wasIsland { panelLayout.island = nil }
             p.allowsDragging = true
-            if !p.isVisible || wasIsland {
+            let size = NSSize(width: 400, height: 160)
+            if !p.isVisible || hud.style != .mini || p.frame.size != size {
                 // Only position on appearance, so a window the user is dragging stays put.
-                let size = NSSize(width: p.frame.width, height: 160)
                 if let origin = RecordingPanelPlacement.origin(for: size) { p.setFrame(NSRect(origin: origin, size: size), display: false) }
             }
+            hud.setStyle(.mini)
         }
-        p.alphaValue = 1
-        if !p.isVisible { p.orderFrontRegardless(); LaunchTrace.mark("panel-ordered-front") }
+        hud.apply(state: state, message: message, copied: copiedToClipboard, appearing: appearing)
+        if !p.isVisible { p.alphaValue = 1; p.orderFrontRegardless(); LaunchTrace.mark("panel-ordered-front") }
     }
     func pruneHistory() { guard historyMigration == nil else { return }; let days = UserDefaults.standard.integer(forKey: "historyRetentionDays"); if days > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) { let removed = history.filter { $0.date < cutoff }; deleteRecordings(removed); history.removeAll { $0.date < cutoff }; if !removed.isEmpty { saveHistory() } } }
     func refreshLoginStatus() { loginEnabled = SMAppService.mainApp.status == .enabled }

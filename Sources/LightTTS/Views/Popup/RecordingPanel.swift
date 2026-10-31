@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 /// The floating recording window. In the Mini style it can be dragged from anywhere on
 /// the capsule; a click that does not move still reaches the buttons inside it.
@@ -110,22 +109,5 @@ struct IslandMetrics: Equatable {
         NSRect(
             x: screenFrame.midX - panelSize.width / 2, y: screenFrame.maxY - panelSize.height,
             width: panelSize.width, height: panelSize.height)
-    }
-}
-
-@MainActor final class RecordingPanelLayout: ObservableObject {
-    @Published var island: IslandMetrics?
-}
-
-struct RecordingPanelRoot: View {
-    @ObservedObject var controller: AppController
-    @ObservedObject var layout: RecordingPanelLayout
-
-    var body: some View {
-        if let island = layout.island {
-            IslandRecordingView(controller: controller, metrics: island)
-        } else {
-            RecordingView(controller: controller)
-        }
     }
 }
