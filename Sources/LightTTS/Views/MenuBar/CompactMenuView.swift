@@ -27,6 +27,8 @@ struct CompactMenuView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var controller: AppController
     let openSettings: () -> Void
+    let recordingAction: () -> Void
+    let cancelRecording: () -> Void
     @AppStorage("selectedModel") private var selectedModel = ModelDefaults.selectedModel
     @AppStorage("inputDeviceUID") private var selectedInput = ""
     @AppStorage("autoPaste") private var autoPaste = true
@@ -37,6 +39,31 @@ struct CompactMenuView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            switch controller.state {
+            case "idle", "recording":
+                Button(action: recordingAction) {
+                    HStack {
+                        Text(controller.state == "idle" ? "Start Recording" : "Stop Recording")
+                        Spacer()
+                        Text(ShortcutButton.displayName(.toggle)).foregroundStyle(.secondary)
+                    }.contentShape(Rectangle()).padding(.horizontal, 14).frame(height: 32)
+                }.buttonStyle(.plain)
+                .help("Toggle recording (\(ShortcutButton.displayName(.toggle)))")
+                if controller.state == "recording" {
+                    Button("Cancel Recording", action: cancelRecording)
+                        .buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).frame(height: 32)
+                }
+                Divider().padding(.horizontal, 14).padding(.vertical, 4)
+            case "starting", "loading", "processing":
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(controller.state == "starting" ? "Starting recording…" : controller.state == "loading" ? "Loading model…" : "Processing recording…")
+                    Spacer()
+                    Button("Cancel", action: recordingAction).buttonStyle(.plain)
+                }.padding(.horizontal, 14).frame(height: 32)
+                Divider().padding(.horizontal, 14).padding(.vertical, 4)
+            default: EmptyView()
+            }
             if controller.state == "error" {
                 Button("Dismiss error") { controller.cancel() }
                     .buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).frame(height: 32)
