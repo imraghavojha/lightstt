@@ -90,6 +90,30 @@ final class TranscriptionServiceTests: XCTestCase {
     private let b = EngineConfiguration(modelID: "model", language: "fr")
     private let audio = PCM16k(samples: [0.1])
 
+    func testSpeculativeLoadFailureAndCrashAreReported() async throws {
+        struct Failure: LocalizedError {
+            var errorDescription: String? { "load failed" }
+        }
+        let factory = TestFactory()
+        var failures: [String] = []
+        let reported = expectation(description: "load failure reported")
+        let service = TranscriptionService(factory: factory, scheduler: ManualScheduler()) {
+            failures.append($0)
+            if failures.count == 1 { reported.fulfill() }
+        }
+        service.warm(a)
+        await factory.waitForRequests(1)
+        factory.requests[0].continuation.resume(throwing: Failure())
+        await fulfillment(of: [reported], timeout: 2)
+        XCTAssertEqual(failures, ["load failed"])
+        service.warm(a)
+        await factory.waitForRequests(2)
+        factory.requests[1].continuation.resume(returning: TestEngine())
+        try await service.prepare(a)
+        factory.requests[1].crash()
+        XCTAssertEqual(failures.last, "Speech engine exited unexpectedly. Try recording again.")
+    }
+
     func testWarmReuseConfigurationIdentityAndStaleCompletion() async throws {
         let factory = TestFactory()
         let service = TranscriptionService(factory: factory, scheduler: ManualScheduler())
