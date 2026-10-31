@@ -1,10 +1,27 @@
-On an Apple M1 Max (64 GB) running macOS 27.0.1, release builds were measured under load using footprint and top after two minutes idle and a synthetic 16 kHz WAV transcription with Whisper tiny.en.
+# Performance measurements
 
-| Metric | LightTTS | SuperWhisper |
-| --- | --- | --- |
-| Physical footprint after 2 min idle | 13 MB | N/A: three interrupted attempts |
-| Idle CPU, energy impact, wakeups/s (60 s mean) | 0.0%, 0.0, 0.0 | N/A: three interrupted attempts |
-| Launch to menu-bar item | 199 ms | N/A: item timing not observed |
-| Stop to paste | 140 ms; expected text observed | N/A: transcription not established unattended |
-| Peak footprint during transcription | N/A: sampling did not isolate processing; 156 MB app + helper observed around completion | N/A |
-| Footprint 2.5 min after transcription | 18 MB; helper exited | N/A |
+Measurements below are observations, not a claim that LightTTS is faster or lighter than SuperWhisper. No successful paired SuperWhisper measurement has been made. The current optimization only changes history WAV encoding after insertion; it does not change the model, recognition, or stop-to-visible path.
+
+On Apple M1 Max, macOS 27.0.1, base `3e801099f5d03d23049eab4a8cbe53baa44d54a1`, installed release app with Parakeet v3 selected on AC:
+
+- Bundle: `du -sh ~/Applications/LightTTS.app` reported 68 MiB. Models are outside the bundle: 3.1 GiB for the entire LightTTS model directory, including 461 MiB for the v3 model directory. Disk allocation and installed models vary.
+- One read-only idle snapshot: `footprint` reported 21 MB app + 30 MB helper = 51 MB physical footprint, excluding separately reported neural memory; this is not peak inference memory. A later sample reported 50 MB total. A prior 60-second run at five-second intervals reported 0.0% CPU for both processes; it is not a battery-life measurement.
+- Previous three real-microphone sentence tests took 562–699 ms from stop to visible text, including harness polling; one of three contained recognition errors. These are not paired comparisons.
+- A prior TextEdit trace (`/tmp/lighttts-final-stderr.log`) has hotkey-stop to text-inserted about 408 ms, helper inference about 150 ms, and the remainder about 258 ms, using this machine's mach timebase (125/3 ns). The remainder includes capture, setup, IPC and insertion; it is not a controlled fixture or an isolated app overhead benchmark. Other traces differ by target and timing.
+- A fixed synthetic speech WAV (SHA-256 `0d7d0d63c5f6ad339d12e008657d0866d093a75bb71595ee3ba2ab622ff1db5c`, 40,689 samples, expected “The little green bird landed on the wooden fence.”) produced that exact text in all five runs on the installed helper. Warm request 215 ms; helper round trips 226, 98, 100, 184, 104 ms. These include helper IPC and PCM read, not app capture or insertion. First inference is included; there was no warmup transcription. Reproduce using `scripts/perf/helper-benchmark.py <helper> <16k-mono-PCM16.wav>`.
+- On the same fixture, 101 release-compiled encoding calls: baseline median 0.695 ms, p95 0.845 ms; bulk encoding median 0.003 ms, p95 0.003 ms. The benchmark verifies byte equality and uses the exact old encoder. Run `scripts/perf/benchmark-wav.sh <fixture.wav>`. This is post-insertion CPU work, not a measured latency improvement to paste.
+
+The controller currently hides the popup after delivery but stays processing until history analysis and WAV encoding complete. A new shortcut can therefore cancel this task before history is committed. History migration, cancellation and ordering need coordinated handling before moving persistence to an independent task. Cancel also invalidates a warm engine; cancellation during inference deliberately terminates it to avoid stale results. History transcription currently uses a separate helper, potentially overlapping live work. Device enumeration for a non-default microphone is synchronous on stop. These are investigation findings, not measured improvements in this change.
+
+## Reproducible final comparison
+
+Use a sequential, same-machine comparison after both changes are integrated. Record date, hardware, power, app versions/build SHAs, bundle paths, model identifiers and storage locations, audio settings, shortcut mode, and whether each model was warm. Preserve existing settings and other windows. Do not quit or close unrelated applications. Use a uniquely named disposable text document per trial, and remove only those documents created by the test. The operator must verify that each app is not recording or processing before idle sampling; the script cannot independently verify microphone state.
+
+1. Record bundle disk usage with `du -sh '<app>.app'` and model storage separately with `du -sh '<model directory>'`. If a model location is unknown, record unknown; do not infer it from bundle size. Do not add shared model folders twice.
+2. With each app already running and confirmed idle, identify its root PID and run `scripts/perf/process-sample.py --pid <PID> --seconds 60 --interval 5 --idle-confirmed > <app>-idle.jsonl`. This samples descendants and reports `footprint` physical footprints, separate neural metrics, and interval CPU percentages computed from cumulative CPU-time differences. The first CPU sample, and samples containing newly discovered processes, are null until a baseline exists. Processes that exit between enumeration and sampling can make a sample fail. Record helper processes outside the tree separately if discovered. Neural memory is not included in the reported physical footprint; neural peak is historical, not current usage. Record launch readiness only when an external, observable readiness event and launch timestamp are available; otherwise mark unmeasured.
+3. Use the same speaker, microphone, three full sentences and order for each app, with comparable settings and a unique target document. Measure from the shortcut release/stop event to the first visible final text using a timestamped screen recording or equivalent external instrumentation with stated resolution. Record each reference, actual text, stop-to-visible time, errors and failed/empty trials. Do not calculate a successful latency for a failure; report it as failed. Preserve the recording only with consent. Live microphone testing must be within the user's authorized task.
+4. Repeat process sampling during and after dictation if peak and residency are needed; sample rate limits peak accuracy. Report all results separately, including unavailable values and the method. No automated SuperWhisper control or accuracy assertion is implied by these scripts.
+
+## Upstream context
+
+[FluidAudio's benchmarks at the dependency revision](https://github.com/FluidInference/FluidAudio/blob/6b516c3dbf6275cff692ea38bed2bd5764ea74cd/Documentation/Benchmarks.md) describe model, dataset and hardware-dependent throughput and accuracy; these are not measurements of this app. [whisper.cpp v1.7.5 documentation](https://github.com/ggml-org/whisper.cpp/blob/v1.7.5/README.md) documents model memory and quantization tradeoffs. This change does not select a smaller or quantized model, change inference, or upgrade either dependency.

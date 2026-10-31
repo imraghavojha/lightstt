@@ -461,7 +461,7 @@ import IOKit.ps
                     let analysis = await Task.detached(priority: .utility) { (AudioProcessing.speechSegments(rawSamples), AudioProcessing.waveform(rawSamples)) }.value
                     item.segments = analysis.0; item.waveform = analysis.1
                     let filename = item.id.uuidString + ".wav"
-                    let recording = await Task.detached(priority: .utility) { Self.recordingData(rawSamples) }.value
+                    let recording = await Task.detached(priority: .utility) { RecordingWAV.encode(rawSamples) }.value
                     guard !Task.isCancelled, current == generation else { return }
                     item.audioFile = filename; pendingHistoryAudio[filename] = recording
                 }
@@ -558,16 +558,6 @@ import IOKit.ps
         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
         catch { message = error.localizedDescription }
         refreshLoginStatus()
-    }
-    nonisolated private static func recordingData(_ samples: [Float]) -> Data {
-        var result = Data()
-        func append<T: FixedWidthInteger>(_ value: T) { var value = value.littleEndian; withUnsafeBytes(of: &value) { result.append(contentsOf: $0) } }
-        let size = UInt32(samples.count * MemoryLayout<Float>.size)
-        result.append(contentsOf: "RIFF".utf8); append(size + 36); result.append(contentsOf: "WAVEfmt ".utf8)
-        append(UInt32(16)); append(UInt16(3)); append(UInt16(1)); append(UInt32(16000)); append(UInt32(64000)); append(UInt16(4)); append(UInt16(32))
-        result.append(contentsOf: "data".utf8); append(size)
-        for sample in samples { append(sample.bitPattern) }
-        return result
     }
     func historyAudioURL(_ item: HistoryEntry) -> URL? {
         guard let file = item.audioFile, file == item.id.uuidString + ".wav" else { return nil }
