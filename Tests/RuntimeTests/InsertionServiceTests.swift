@@ -220,6 +220,29 @@ final class InsertionServiceTests: XCTestCase {
         XCTAssertEqual(target.calls, ["paste: hello"])
     }
 
+    func testWorkerErrorsPreserveCopyAndWarningBehavior() async {
+        for (error, delivery, warning) in [
+            (FocusError.cancelled, InsertionOutcome.Delivery.skipped, false),
+            (.clipboardChanged, .copied, false),
+            (.modifiersHeld, .copied, true),
+        ] {
+            let target = FakeTarget()
+            target.error = error
+            let clipboard = FakeClipboard()
+            let service = makeService(
+                result: FocusResult(target: target, disposition: .editable), clipboard: clipboard,
+                send: true, shift: true, history: false)
+            let outcome = await service.deliver(
+                "hello", to: service.captureAtStop(), autoPaste: true
+            ) { true }
+            XCTAssertEqual(outcome.delivery, delivery)
+            XCTAssertEqual(outcome.warning != nil, warning)
+            XCTAssertEqual(target.calls, ["paste: hello"])
+            XCTAssertEqual(clipboard.writes.count, delivery == .copied ? 1 : 0)
+            if delivery == .copied { XCTAssertEqual(clipboard.writes.first?.1, false) }
+        }
+    }
+
     func testFocusPolicyAndRestoration() async {
         XCTAssertEqual(
             focusDisposition(role: nil, subrole: nil, secureInput: false, isOpaqueApp: true),

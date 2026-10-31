@@ -33,3 +33,17 @@ struct NativeTranscriptClipboard: TranscriptClipboard {
         board.writeObjects([item])
     }
 }
+
+@MainActor
+func makeNativeInsertionService() -> InsertionService {
+    InsertionService(
+        focus: NativeFocusCapture(), clipboard: NativeTranscriptClipboard(),
+        options: {
+            let defaults = UserDefaults.standard
+            return InsertionOptions(
+                simulateTyping: false, sendOnShift: defaults.bool(forKey: "sendOnShift"),
+                restoreClipboard: defaults.object(forKey: "restoreClipboard") as? Bool ?? true,
+                allowClipboardHistory: defaults.object(forKey: "clipboardHistory") as? Bool ?? true)
+        }, accessibilityGranted: { AXIsProcessTrusted() },
+        shiftHeld: { CGEventSource.flagsState(.combinedSessionState).contains(.maskShift) })
+}
