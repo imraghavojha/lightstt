@@ -10,6 +10,7 @@ let package = Package(name: "LightTTS", platforms: [.macOS("14.2")], products: [
     .executableTarget(name: "LightTTSCLI", dependencies: ["LightTTSCore", "LightTTSInference", .product(name: "FluidAudio", package: "FluidAudio")]),
     .executableTarget(name: "model-validation", dependencies: ["LightTTSCore", "LightTTSInference"]),
     .executableTarget(name: "cloud-validation", dependencies: ["LightTTSCore", "LightTTSInference"]),
+    .testTarget(name: "AppTests", dependencies: ["LightTTS"]),
     .testTarget(name: "CoreTests", dependencies: ["LightTTSCore"]),
     .testTarget(name: "RuntimeTests", dependencies: ["LightTTSRuntime"])
 ])
