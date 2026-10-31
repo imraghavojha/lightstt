@@ -16,7 +16,7 @@ import IOKit.ps
 @MainActor final class ModelProgress: ObservableObject { @Published var value: Double = 0 }
 
 @MainActor final class AppController: NSObject, ObservableObject {
-    @Published var state = "idle" { didSet { hotkey.setRecording(CancelRegistrationState.isActiveSession(state)) } }
+    @Published var state = "idle" { didSet { hotkey.setRecording(CancelRegistrationState.isActiveSession(state)); updateResidency() } }
     @Published var settingsSelection = "Sound"
     private var previousSettingsSelection = "Sound"
     let recordingLevel = RecordingLevel()
@@ -42,12 +42,15 @@ import IOKit.ps
     let modelProgress = ModelProgress()
     var onCatalogReady: (() -> Void)?
     private var downloadTask: Task<Void, Never>?
-    private var engine: (any TranscriptionEngine)?
-    private var unloadTimer: Timer?
-    private var loadedID = ""
-    private var warmingID = ""
-    private var warmingToken = UUID()
-    private var warming: Task<any TranscriptionEngine, Error>?
+    private lazy var transcriptionService = makeNativeTranscriptionService(resolveModel: { [weak self] id in
+        guard let model = self?.models.first(where: { $0.id == id }), ModelStore.exists(model) else {
+            throw SpeechError.model("Download a model in Models settings first.")
+        }
+        return model
+    }, onFailure: { [weak self] error in
+        guard let self, self.state != "idle", self.state != "error" else { return }
+        self.fail(error)
+    })
 
     private let captureService = CaptureService(factory: NativeCaptureDriverFactory())
     private let audioDucking = AudioDuckingService(driver: NativeAudioDuckingDriver())
@@ -182,7 +185,7 @@ import IOKit.ps
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == "idle", ProcessInfo.processInfo.environment["LIGHTTTS_UI_SHOT_STATE"] == nil else { return }
-                if !self.onACPower && !self.keepModelLoaded && (self.engine != nil || self.warming != nil) { self.unloadEngine() }
+                if !self.onACPower && !self.keepModelLoaded { self.updateResidency() }
                 self.dismissPanel()
             }
         }
@@ -214,37 +217,17 @@ import IOKit.ps
         settingsSelection = selection
     }
     func leaveLibrary() { historySearchVisible = false; historySearch = ""; selectSettings(previousSettingsSelection) }
+    private func configuration(for model: Model) -> EngineConfiguration {
+        let language = UserDefaults.standard.string(forKey: "canaryLanguage." + (model.fallbackID ?? model.id)) ?? "en"
+        return EngineConfiguration(modelID: model.id, language: language)
+    }
     func warmSelected() {
         let selected = ProcessInfo.processInfo.environment["LIGHTTTS_TEST_MODEL"] ?? UserDefaults.standard.string(forKey: "selectedModel") ?? ModelDefaults.selectedModel
-        guard selected != loadedID, selected != warmingID, let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { return }
-        warming?.cancel()
-        warmingID = selected; warmingToken = UUID()
-        let token = warmingToken
-        let onCrash: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, self.warmingToken == token else { return }
-                if self.state == "idle" || self.state == "error" { self.unloadEngine() }
-                else { self.fail("Speech engine exited unexpectedly. Try recording again.") }
-            }
-        }
-        let languageID = model.fallbackID ?? model.id
-        let language = UserDefaults.standard.string(forKey: "canaryLanguage." + languageID) ?? "en"
-        let task = Task.detached(priority: .utility) { () -> any TranscriptionEngine in
-            try await HelperEngine.load(model, language: language, onCrash: onCrash)
-        }
-        warming = task
-        if state == "idle" || state == "error" { scheduleEngineUnload() }
-        Task { [weak self] in
-            do { let resolved = try await task.value
-                guard let self, self.warmingToken == token else { (resolved as? HelperEngine)?.terminate(); return }
-                self.engine = resolved; self.loadedID = selected; self.warming = nil; self.warmingID = ""
-                if self.state == "idle" || self.state == "error" { self.scheduleEngineUnload() }
-            }
-            catch { guard let self, self.warmingToken == token else { return }; self.warming = nil; self.warmingID = ""; if !(error is CancellationError) && self.state != "idle" && self.state != "error" { self.fail(error.localizedDescription) } }
-        }
+        guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { return }
+        transcriptionService.warm(configuration(for: model))
     }
     func reloadSelectedModel() {
-        unloadEngine()
+        transcriptionService.invalidate(modelID: nil)
         if onACPower { warmSelected() }
     }
     private var onACPower: Bool {
@@ -252,8 +235,22 @@ import IOKit.ps
         return source as String == kIOPSACPowerValue
     }
     private func powerChanged() {
-        if onACPower { unloadTimer?.invalidate(); unloadTimer = nil; warmSelected() }
-        else if state == "idle" || state == "error" { scheduleEngineUnload() }
+        updateResidency()
+        if onACPower { warmSelected() }
+    }
+    private func updateResidency() {
+        let defaults = UserDefaults.standard
+        let timeout = defaults.object(forKey: "modelIdleTimeoutSeconds") == nil ? 300 : defaults.double(forKey: "modelIdleTimeoutSeconds")
+        let phase: RecordingPhase
+        switch state {
+        case "starting": phase = .starting
+        case "recording": phase = .recording
+        case "processing", "loading": phase = .processing(.transcribing)
+        case "done": phase = .done
+        case "error": phase = .error(SessionFailure(category: .other, message: message))
+        default: phase = .idle
+        }
+        transcriptionService.updateResidency(policy: ModelResidencyPolicy(keepLoaded: keepModelLoaded, onACPower: onACPower, unloadAfter: timeout), phase: phase)
     }
     @discardableResult func installHotkey() -> Bool {
         guard !isTestAudio && !CommandLine.arguments.contains("--ui-fixture") && !ShortcutButton.isRecording && !MouseShortcutButton.isRecording else { return false }
@@ -298,7 +295,6 @@ import IOKit.ps
         guard state == "idle", historyMigration == nil, reprocessingHistoryID == nil else { return }
         copiedToClipboard = false
         recordingUsesPushToTalk = pushToTalk
-        unloadTimer?.invalidate(); unloadTimer = nil
         generation += 1; let current = generation
         LaunchTrace.mark("recording-start-request")
         state = "starting"
@@ -422,22 +418,13 @@ import IOKit.ps
                 LaunchTrace.mark("model-check-start")
                 guard let model = models.first(where: { $0.id == selected }), ModelStore.exists(model) else { throw SpeechError.model("Download a model in Models settings first.") }
                 LaunchTrace.mark("model-check-end")
-                if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE model selected=%@ loaded=%@ engine=%@", selected, loadedID, engine == nil ? "nil" : "ready") }
-                if loadedID != selected || engine == nil {
+                let configuration = configuration(for: model)
+                if transcriptionService.snapshot.loaded != configuration {
                     state = "loading"
-                    warmSelected()
-                    let token = warmingToken
-                    let resolved: any TranscriptionEngine
-                    do {
-                        if warmingID == selected, let warming { resolved = try await warming.value }
-                        else { let language = UserDefaults.standard.string(forKey: "canaryLanguage." + (model.fallbackID ?? model.id)) ?? "en"; resolved = try await HelperEngine.load(model, language: language) }
-                    } catch { if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }; throw error }
-                    if warmingID == selected && warmingToken == token { warmingID = ""; warming = nil }
+                    try await transcriptionService.prepare(configuration)
                     try Task.checkCancellation(); guard current == generation else { return }
-                    engine = resolved; loadedID = selected
                 }
                 state = "processing"
-                guard let engine else { return }
                 try Task.checkCancellation(); guard current == generation else { return }
 
                 let remove = UserDefaults.standard.bool(forKey: "removeSilence"), normalize = UserDefaults.standard.bool(forKey: "normalizeAudio")
@@ -446,11 +433,10 @@ import IOKit.ps
                 LaunchTrace.mark("audio-processing-end")
                 guard !samples.isEmpty else { throw SpeechError.audio("No speech detected. Try speaking louder or turn off silence removal.") }
                 LaunchTrace.mark("inference-start")
-                let text = try await engine.transcribe(samples: samples)
+                let text = try await transcriptionService.transcribe(PCM16k(samples: samples), using: configuration, purpose: .live)
                 LaunchTrace.mark("inference-finished")
 
                 guard current == generation else { return }
-                if !keepModelLoaded && !onACPower { unloadEngine() }
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
                 if ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] != nil && ProcessInfo.processInfo.environment["LIGHTTTS_TEST_PASTE"] != "1" {
                     print("LIGHTTTS_TEST transcription completed, samples: \(samples.count)")
@@ -520,31 +506,8 @@ import IOKit.ps
     private var keepModelLoaded: Bool {
         UserDefaults.standard.object(forKey: "keepModelLoaded") as? Bool ?? true
     }
-    private func unloadEngine() {
-        unloadTimer?.invalidate(); unloadTimer = nil
-        warmingToken = UUID(); warming?.cancel(); warming = nil; warmingID = ""
-        (engine as? HelperEngine)?.terminate()
-        engine = nil; loadedID = ""
-    }
-    // One coalescible, non-repeating timer only while a model is resident or loading.
-    // Set modelIdleTimeoutSeconds in defaults to change the five-minute default.
-    private func scheduleEngineUnload() {
-        unloadTimer?.invalidate(); unloadTimer = nil
-        guard engine != nil || warming != nil else { return }
-        if onACPower { return }
-        guard keepModelLoaded else { unloadEngine(); return }
-        let configured = UserDefaults.standard.object(forKey: "modelIdleTimeoutSeconds") == nil ? 300 : UserDefaults.standard.double(forKey: "modelIdleTimeoutSeconds")
-        let interval = max(1, configured)
-        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.state == "idle" || self.state == "error" else { return }
-                self.unloadEngine()
-            }
-        }
-        timer.tolerance = 0
-        RunLoop.main.add(timer, forMode: .common)
-        unloadTimer = timer
-    }
+    private func unloadEngine() { transcriptionService.invalidate(modelID: nil) }
+    private func scheduleEngineUnload() { updateResidency() }
     func fail(_ text: String) {
         panelDeadline?.cancel()
         endDucking()
@@ -627,10 +590,7 @@ import IOKit.ps
                 let start = Date()
                 let remove = UserDefaults.standard.bool(forKey: "removeSilence"), normalize = UserDefaults.standard.bool(forKey: "normalizeAudio")
                 let samples = try await Task.detached(priority: .userInitiated) { AudioProcessing.apply(try AudioFileReader.read(url), removeSilence: remove, normalize: normalize) }.value
-                let language = UserDefaults.standard.string(forKey: "canaryLanguage." + (model.fallbackID ?? model.id)) ?? "en"
-                let worker = try await HelperEngine.load(model, language: language)
-                defer { (worker as? HelperEngine)?.terminate() }
-                let text = try await worker.transcribe(samples: samples)
+                let text = try await transcriptionService.transcribe(PCM16k(samples: samples), using: configuration(for: model), purpose: .history(entryID: item.id))
                 guard !text.isEmpty else { throw SpeechError.audio("No speech detected.") }
                 if let index = history.firstIndex(where: { $0.id == item.id }) {
                     history[index].text = text; history[index].modelName = model.name; history[index].processingDuration = Date().timeIntervalSince(start)
@@ -798,7 +758,7 @@ import IOKit.ps
                 try await Task.detached(priority: .userInitiated) { if ModelStore.exists(model) { try ModelStore.delete(model) } }.value
                 if model.id.hasPrefix("custom-") { models.removeAll { $0.id == model.id }; let custom = models.filter { $0.id.hasPrefix("custom-") }; UserDefaults.standard.set(try JSONEncoder().encode(custom), forKey: "customModels") }
                 if UserDefaults.standard.string(forKey: "selectedModel") == model.id { UserDefaults.standard.set(ModelDefaults.selectedModel, forKey: "selectedModel"); unloadEngine() }
-                if warmingID == model.id { warming?.cancel(); warming = nil; warmingID = ""; warmingToken = UUID() }
+                transcriptionService.invalidate(modelID: model.id)
             } catch { message = error.localizedDescription }
             busyModel = nil; modelOperation = nil; objectWillChange.send()
         }
@@ -806,11 +766,11 @@ import IOKit.ps
     func cancelDownload() { downloadTask?.cancel() }
 
     func beginQuit() {
-        downloadTask?.cancel(); processing?.cancel(); warming?.cancel()
+        downloadTask?.cancel(); processing?.cancel()
         pendingHistoryReprocess = nil
         endDucking()
         if state != "idle" { cancel() }
-        unloadEngine()
+        transcriptionService.shutdown()
     }
     func finishQuit() async {
         await audioDucking.waitForRestoration()

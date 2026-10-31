@@ -37,3 +37,37 @@ private final class HelperEngineClient: EngineClient {
         helper.terminate()
     }
 }
+
+@MainActor
+private final class NativeTimerCancellation: ScheduledCancellation {
+    let timer: Timer
+    init(_ timer: Timer) { self.timer = timer }
+    func cancel() { timer.invalidate() }
+}
+
+@MainActor
+private struct NativeTranscriptionScheduler: RuntimeScheduling {
+    var wallTime: Date { Date() }
+    var monotonicTime: TimeInterval { ProcessInfo.processInfo.systemUptime }
+    func schedule(after delay: TimeInterval, _ action: @escaping @MainActor () -> Void)
+        -> any ScheduledCancellation
+    {
+        let timer = Timer(timeInterval: delay, repeats: false) { _ in
+            Task { @MainActor in action() }
+        }
+        timer.tolerance = 0
+        RunLoop.main.add(timer, forMode: .common)
+        return NativeTimerCancellation(timer)
+    }
+}
+
+@MainActor
+func makeNativeTranscriptionService(
+    resolveModel: @escaping @MainActor (String) throws -> Model,
+    onFailure: @escaping @MainActor (String) -> Void
+) -> TranscriptionService {
+    TranscriptionService(
+        factory: HelperEngineClientFactory(resolveModel: resolveModel),
+        scheduler: NativeTranscriptionScheduler(), onFailure: onFailure
+    )
+}

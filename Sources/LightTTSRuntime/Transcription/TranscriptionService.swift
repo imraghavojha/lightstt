@@ -4,6 +4,7 @@ import Foundation
 public final class TranscriptionService: TranscriptionServicing {
     private let factory: any EngineClientFactory
     private let scheduler: any RuntimeScheduling
+    private let onFailure: @MainActor (String) -> Void
     private var policy = ModelResidencyPolicy(keepLoaded: true, onACPower: true, unloadAfter: 300)
     private var phase: RecordingPhase = .idle
     private var client: (any EngineClient)?
@@ -19,9 +20,13 @@ public final class TranscriptionService: TranscriptionServicing {
     private var historyGeneration = UUID()
     private var observers: [UUID: AsyncStream<TranscriptionSnapshot>.Continuation] = [:]
 
-    public init(factory: any EngineClientFactory, scheduler: any RuntimeScheduling) {
+    public init(
+        factory: any EngineClientFactory, scheduler: any RuntimeScheduling,
+        onFailure: @escaping @MainActor (String) -> Void = { _ in }
+    ) {
         self.factory = factory
         self.scheduler = scheduler
+        self.onFailure = onFailure
     }
 
     public var snapshot: TranscriptionSnapshot {
@@ -79,6 +84,7 @@ public final class TranscriptionService: TranscriptionServicing {
                     self.warmTask = nil
                     self.publish()
                     self.resetTimer()
+                    if !(error is CancellationError) { self.onFailure(error.localizedDescription) }
                 }
                 throw error
             }
@@ -217,6 +223,7 @@ public final class TranscriptionService: TranscriptionServicing {
     private func crashed(token: UUID) {
         guard token == generation else { return }
         clearLive()
+        onFailure("Speech engine exited unexpectedly. Try recording again.")
     }
 
     private func clearLive() {
