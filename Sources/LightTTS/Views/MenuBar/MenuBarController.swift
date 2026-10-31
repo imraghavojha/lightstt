@@ -89,6 +89,10 @@ enum SettingsWindowSizing {
         let settings = item("Settings…", detail: nil, action: #selector(openSettingsFromMenu))
         settings.keyEquivalent = ","
         menu.addItem(settings)
+        menu.addItem(.separator())
+        let quit = item("Quit LightTTS", detail: nil, action: #selector(quitApp))
+        quit.keyEquivalent = "q"
+        menu.addItem(quit)
     }
 
     func menuDidClose(_ menu: NSMenu) {
@@ -173,6 +177,9 @@ enum SettingsWindowSizing {
     @objc private func toggleRecording() { app.toggleRecording() }
     @objc private func cancelRecording() { app.cancel() }
     @objc private func openSettingsFromMenu() { openSettingsWindow() }
+    // Goes through applicationShouldTerminate, which cancels any session, restores audio,
+    // flushes history and stops the speech engine before exiting.
+    @objc private func quitApp() { NSApp.terminate(nil) }
     @objc private func openModelsSettings() {
         app.selectSettings("Models")
         openSettingsWindow()
