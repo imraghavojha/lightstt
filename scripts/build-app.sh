@@ -17,6 +17,31 @@ for framework in "$BIN"/*.framework; do
     name="$(basename "$framework")"
     if otool -L "$BIN/LightTTS" "$BIN/LightTTSEngine" | grep -Fq "@rpath/$name/"; then cp -R "$framework" "$APP/Contents/Frameworks/"; fi
 done
+# Optimize only staged release code, leaving SwiftPM products and debug symbols intact.
+if [[ "$CONFIG" == "release" ]]; then
+    for executable in "$APP/Contents/MacOS/LightTTS" "$APP/Contents/Helpers/LightTTSEngine"; do
+        [[ "$(lipo -archs "$executable")" == "arm64" ]] || { echo "Unsupported executable architecture: $executable" >&2; exit 1; }
+        xcrun strip -S -x "$executable"
+    done
+    whisper="$APP/Contents/Frameworks/whisper.framework/Versions/A/whisper"
+    if [[ -f "$whisper" ]]; then
+        archs="$(lipo -archs "$whisper")"
+        case " $archs " in
+            *" arm64 "*) ;;
+            *) echo "Unsupported whisper framework architectures: $archs" >&2; exit 1 ;;
+        esac
+        if [[ "$archs" != "arm64" ]]; then
+            # Write to a temporary sibling so the framework's symlinks remain intact.
+            thin="$(mktemp "${whisper}.thin.XXXXXX")"
+            if ! lipo "$whisper" -thin arm64 -output "$thin"; then
+                rm -f "$thin"
+                exit 1
+            fi
+            chmod "$(stat -f '%Lp' "$whisper")" "$thin"
+            mv -f "$thin" "$whisper"
+        fi
+    fi
+fi
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,6 +54,9 @@ if [[ "$CONFIG" == "debug" ]]; then
     /usr/libexec/PlistBuddy -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string lighttts' "$APP/Contents/Info.plist"
 fi
 if [[ "${LIGHTTTS_TEST_ADHOC:-0}" == "1" ]]; then
+    if [[ -d "$APP/Contents/Frameworks/whisper.framework" ]]; then
+        codesign --force --sign - "$APP/Contents/Frameworks/whisper.framework"
+    fi
     codesign --force --deep --sign - "$APP"
     codesign --verify --deep --strict "$APP"
     echo "$APP"
@@ -38,6 +66,9 @@ KEYCHAIN="$HOME/Library/Keychains/lighttts-signing.keychain-db"
 security unlock-keychain -p lighttts-local "$KEYCHAIN"
 HASH="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/"LightTTS Dev Signing"/ {print $2; exit}')"
 [[ "$HASH" == A724F6248DA5926127DE1748FC9EC01C60644679 ]] || { echo "LightTTS signing identity is missing; run scripts/setup-signing.sh." >&2; exit 1; }
+if [[ -d "$APP/Contents/Frameworks/whisper.framework" ]]; then
+    codesign --force --sign "$HASH" --keychain "$KEYCHAIN" "$APP/Contents/Frameworks/whisper.framework"
+fi
 codesign --force --sign "$HASH" --keychain "$KEYCHAIN" "$APP/Contents/Helpers/LightTTSEngine"
 codesign --force --deep --sign "$HASH" --keychain "$KEYCHAIN" "$APP"
 codesign --force --sign "$HASH" --keychain "$KEYCHAIN" --requirements "=designated => identifier \"com.lighttts.app\" and certificate leaf = H\"$HASH\"" "$APP"

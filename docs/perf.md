@@ -13,6 +13,10 @@ On Apple M1 Max, macOS 27.0.1, base `3e801099f5d03d23049eab4a8cbe53baa44d54a1`, 
 
 The controller currently hides the popup after delivery but stays processing until history analysis and WAV encoding complete. A new shortcut can therefore cancel this task before history is committed. History migration, cancellation and ordering need coordinated handling before moving persistence to an independent task. Cancel also invalidates a warm engine; cancellation during inference deliberately terminates it to avoid stale results. History transcription currently uses a separate helper, potentially overlapping live work. Device enumeration for a non-default microphone is synchronous on stop. These are investigation findings, not measured improvements in this change.
 
+## Release bundle packaging
+
+Release builds strip debug and local symbols from the staged app and helper executables and keep only the arm64 slice of the staged Whisper framework before signing. Debug builds retain their symbols, and SwiftPM build products are not modified. On this machine, equivalent signed release bundles from source `9edc170` used 69,588 KiB before and 45,880 KiB after (`du -sk`); the sums of regular-file logical sizes were 71,205,911 and 46,926,935 bytes, respectively. Models are stored outside the bundle. Allocation varies by filesystem.
+
 ## Reproducible final comparison
 
 Use a sequential, same-machine comparison after both changes are integrated. Record date, hardware, power, app versions/build SHAs, bundle paths, model identifiers and storage locations, audio settings, shortcut mode, and whether each model was warm. Preserve existing settings and other windows. Do not quit or close unrelated applications. Use a uniquely named disposable text document per trial, and remove only those documents created by the test. The operator must verify that each app is not recording or processing before idle sampling; the script cannot independently verify microphone state.
