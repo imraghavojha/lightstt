@@ -21,4 +21,4 @@ The SwiftUI menu-bar app handles recording, settings, and text insertion. A sepa
 
 ## Performance
 
-See [performance measurements](docs/perf.md) for the tested build, model, methods, and limits. The app bundle, downloaded models, and inference helper all contribute to resource use; measurements depend on the selected model and workload.
+The measured signed release occupies about 45 MiB, excluding downloaded models. See [performance measurements](docs/perf.md) for latency, app-plus-helper resource use, the SuperWhisper comparison, methods, and verification limits. Measurements depend on the selected model and workload.

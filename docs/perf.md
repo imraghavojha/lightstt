@@ -2,6 +2,29 @@
 
 These are observations of two installed configurations on one machine, not a general ranking or a comparison of equivalent inference engines. LightTTS used Parakeet TDT 0.6B v3; SuperWhisper used Whisper Large v3 Turbo. SuperWhisper's interface showed its Parakeet options locked, so no matching model was downloaded or tested. Three short sentences are too few to establish accuracy or a reliable latency distribution.
 
+## Final signed release
+
+The installed release built from `86c17b6d452c480c967339338509ab6bfccb7681` has the same production source as merged `998e760612a0743a3c6e2ead2cc6bd698942e852`. Its allocated bundle size is 45,896 KiB (44.82 MiB), excluding downloaded models. The installed SuperWhisper bundle measured 140,172 KiB (136.89 MiB): this LightTTS bundle is about 67% smaller. Strict deep signature verification passed with the existing designated signing identity. The executable UUID was `87942425-DF17-3CBA-8B40-67F8DAA64868`.
+
+Three final LightTTS trials using the same fixtures and 20 ms, stop-release-based AX polling described below took 175.7, 375.2 and 268.1 ms (median 268.1 ms). The corresponding earlier SuperWhisper trials took 466.6, 426.9 and 460.9 ms (median 460.9 ms). Both configurations misrecognized the name sentence. The final LightTTS actual second transcript was “Please send a report to MITU at 9.30 tomorrow morning.” The different selected models and small sample prevent a general speed or accuracy ranking; these measurements do not isolate the effect of any one code change.
+
+Both apps also received 60-second **post-dictation** samples, with 13 observations about five seconds apart. CPU comes from interval cumulative-time differences; the initial sample is excluded. Current neural memory is separate from physical footprint and historical neural peak.
+
+| Post-dictation observation | Final LightTTS app and helper | SuperWhisper |
+| --- | --- | --- |
+| Physical footprint, first → last | 46 → 46 MB | 1,857 → 256 MB |
+| Interval CPU mean (range) | 0.016% (0–0.195%) | 3.33% (2.53–6.64%) |
+| Separately reported current neural memory, first → last | 471 MB → 64 KB | Not reported |
+| Historical neural peak | 475 MB | Not reported |
+
+These changing residency figures are not inference peaks or a battery-life measurement. Shared system services were not attributed. A further SuperWhisper toggle trial completed in 464.1 ms; a preceding attempt inserted only “Standing on the wooden fence.” Neither failed nor truncated attempts were discarded from the evidence.
+
+The final full local checks and installed acceptance passed: TextEdit, Chrome, popup lifecycle, Escape cancellation and idle CPU. Notes and Finder were skipped because safe targets could not be uniquely identified. Live checks reproduced and verified repairs for closing Settings during shortcut capture and resizing below its minimum, then exercised shortcut editing, reset, toggle and push-to-talk. Menu Start → full sentence → menu Stop subsequently inserted the expected sentence into the intended TextEdit document; Settings opened, closed and reopened from the menu. The earlier menu automation omitted click state and an explicit HID source; correcting synthetic input exposed the popover without an app change.
+
+Three distinct-sentence pairs for each close-after preference, plus two pasteboard-watcher pairs per preference, retained both history entries during copy-only retries. One earlier untraced immediate retry failed and its cause remains unknown. The successful watcher trials did not deliver the second shortcut inside the exact clipboard-write/commit interval, so that scheduling boundary is not independently proven race-free. Minimize was invoked and Settings reopened, but the intermediate minimized state was not captured. These limits remain explicit rather than being counted as passes.
+
+Raw local evidence: `/tmp/lighttts-final-release-evidence/` and `/tmp/lighttts-two-flows-evidence/`; reports: `/tmp/lighttts-final-release-verification.md` and `/tmp/lighttts-final-two-flows.md`. Preferences and clipboard were restored, and the installed app was relaunched without test or trace environment.
+
 ## Same-machine comparison
 
 On October 30, 2026, an Apple M1 Max MacBook Pro with 64 GB RAM, macOS 27.0.1, and AC power ran the signed release of LightTTS commit `9edc170c85b773b61cc64ff1164c85d4eb63c9a0` and installed SuperWhisper 3.1.0. The apps ran sequentially, not concurrently. Both selected the default MacBook Pro microphone; output volume was 19. Allocated disk usage is from `du -sk`, rounded to MiB or GiB. Models are outside the application bundles and are not included in bundle sizes.
