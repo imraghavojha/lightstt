@@ -51,6 +51,7 @@ import IOKit.ps
 
     private let captureService = CaptureService(factory: NativeCaptureDriverFactory())
     private let audioDucking = AudioDuckingService(driver: NativeAudioDuckingDriver())
+    private let insertionService = makeNativeInsertionService()
     private let isTestAudio = !(ProcessInfo.processInfo.environment["LIGHTTTS_TEST_AUDIO"] ?? "").isEmpty
 
     private var panel: NSPanel?
@@ -386,11 +387,7 @@ import IOKit.ps
         guard state == "recording" else { return }
         LaunchTrace.mark("stop-enter")
 
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        let frontPID = frontApp?.processIdentifier
-        if ProcessInfo.processInfo.environment["LIGHTTTS_TRACE"] == "1" { NSLog("LIGHTTTS_TRACE stop front bundle=%@ pid=%d", frontApp?.bundleIdentifier ?? "nil", frontPID ?? -1) }
-        let stopShiftHeld = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
-        let stopFocusTask = Task.detached(priority: .userInitiated) { FocusTarget.capture(frontPID: frontPID, shiftHeld: stopShiftHeld) }
+        let stopFocus = insertionService.captureAtStop()
         LaunchTrace.mark("recording-stopped")
         let finishedCapture = captureService.stop()
         let rawSamples = testAudio ?? finishedCapture?.pcm.samples ?? []
@@ -461,40 +458,14 @@ import IOKit.ps
                     try? await Task.sleep(nanoseconds: 150_000_000); if current == generation { hide() }
                     return
                 }
-                var pasteWarning: String?
-                var copied = !sessionAutoPaste
-                if sessionAutoPaste {
-                    let capture = await stopFocusTask.value
-                    try Task.checkCancellation(); guard current == generation else { return }
-                    if !AXIsProcessTrusted() {
-                        pasteWarning = "Grant Accessibility to auto-paste. The transcription was copied to the clipboard."
-                    } else if capture.secure {
-                        copied = true
-                    } else if let target = capture.target, case .unavailable = target.stopDisposition {
-                        copied = true
-                    } else if let target = capture.target {
-                        let restore = shouldRestoreClipboard(disposition: target.stopDisposition, preference: UserDefaults.standard.object(forKey: "restoreClipboard") as? Bool ?? true)
-                        let history = UserDefaults.standard.object(forKey: "clipboardHistory") as? Bool ?? true
-                        let send = UserDefaults.standard.bool(forKey: "sendOnShift")
-                        let shiftHeld = target.shiftHeldAtStop
-                        do {
-                            LaunchTrace.mark("paste-start")
-                            try await Task.detached(priority: .userInitiated) {
-                                let isCurrent = { DispatchQueue.main.sync { current == self.generation && self.processing?.isCancelled != true } }
-                                try target.paste(text, restoreClipboard: restore, allowClipboardHistory: history, isCurrent: isCurrent)
-                                if send && shiftHeld { try target.sendReturn(isCurrent: isCurrent) }
-                            }.value
-                            LaunchTrace.mark("paste-end")
-                        } catch FocusError.cancelled { return }
-                        catch FocusError.secure, FocusError.changed, FocusError.clipboardChanged { copied = true }
-                        catch { pasteWarning = "Could not auto-paste: \(error.localizedDescription). The transcription was copied to the clipboard." }
-                    } else { copied = true }
+                LaunchTrace.mark("paste-start")
+                let outcome = await insertionService.deliver(text, to: stopFocus, autoPaste: sessionAutoPaste) {
+                    current == self.generation && self.processing?.isCancelled != true
                 }
-                try Task.checkCancellation(); guard current == generation else { return }
-                if copied || pasteWarning != nil {
-                    writeTranscriptToClipboard(text)
-                }
-                try Task.checkCancellation(); guard current == generation else { return }
+                LaunchTrace.mark("paste-end")
+                try Task.checkCancellation(); guard current == generation, outcome.delivery != .skipped else { return }
+                let pasteWarning = outcome.warning
+                let copied = outcome.delivery == .copied
 
                 hideImmediately()
                 LaunchTrace.mark("text-inserted")
